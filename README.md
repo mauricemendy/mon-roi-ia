@@ -207,7 +207,6 @@ Spécialisé en automatisation et analyse stratégique des outils IA/no-code
 
 🌐 [mauricemendy.com](https://mauricemendy.com)  
 💼 [LinkedIn](https://www.linkedin.com/in/mauricemendy)  
-📧 [contact@mauricemendy.com](mailto:contact@mauricemendy.com)
 
 ---
 
