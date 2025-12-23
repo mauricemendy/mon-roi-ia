@@ -6,7 +6,7 @@ Un outil de simulation financière **transparent et méthodologiquement rigoureu
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18-blue)](https://reactjs.org/)
 
-🔗 **Demo live :** [mauricemendy.com/roi-calculator](https://mauricemendy.com/roi-calculator)
+
 
 ---
 
