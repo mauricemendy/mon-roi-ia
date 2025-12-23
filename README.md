@@ -112,13 +112,11 @@ Le calculateur **NE prend PAS en compte** :
 - ❌ Échecs sur tâches très spécialisées
 - ❌ Maintenance des prompts dans le temps
 
-👉 **Le ROI réel est généralement inférieur de 10-20% au ROI calculé.**
-
 ---
 
 ## 🔬 Validation
 
-Des données observées sur un échantillon anonymisé de **12 professionnels** (ingénieurs, consultants, marketeurs) ayant adopté Claude/ChatGPT pendant 6 mois montrent :
+Des données observées sur un échantillon anonymisé de **12 professionnels** (ingénieurs, consultants, marketeurs) ayant adopté les automatisations  et l'usage de l'ia générative pendant 6 mois montrent :
 
 - **Écart moyen théorique/observé : -7%**
 - Scripts & automatisation : 52% observé vs 56% théorique
@@ -202,8 +200,9 @@ Ce projet est sous licence **MIT**. Voir [LICENSE](./LICENSE) pour plus de déta
 ## ✍️ Auteur
 
 **Maurice Mendy**  
-Ingénieur Calcul Senior @ Air Liquide Engineering & Construction  
-Spécialisé en automatisation et analyse stratégique des outils IA/no-code
+Ingénieur Calcul Senior @ Air Liquide Engineering & Construction
+Développeur python
+Spécialisé en optimisation de process, automatisation et analyse stratégique des outils IA/no-code
 
 🌐 [mauricemendy.com](https://mauricemendy.com)  
 💼 [LinkedIn](https://www.linkedin.com/in/mauricemendy)  
@@ -236,4 +235,4 @@ Si ce projet vous est utile, n'hésitez pas à lui donner une ⭐ sur GitHub !
 ---
 
 **Version actuelle :** 1.2  
-**Dernière mise à jour :** Décembre 2024
+**Dernière mise à jour :** Décembre 2025
