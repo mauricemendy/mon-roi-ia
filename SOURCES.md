@@ -197,7 +197,7 @@ Les études ne comptabilisent pas :
 
 ## Données Observées (Validation)
 
-Pour valider ces coefficients, nous avons collecté des données sur un échantillon anonymisé de 12 professionnels (ingénieurs, consultants, marketeurs) ayant adopté Claude/ChatGPT dans leur flux de travail quotidien sur 6 mois.
+Pour valider ces coefficients, nous avons collecté des données sur un échantillon anonymisé de 12 professionnels (ingénieurs, formateurs, comptables, RH) ayant adopté Claude/Gemini dans leur flux de travail quotidien sur 6 mois en 2025.
 
 **Résultats :**
 - Écart moyen théorique/réel : **-7%**
