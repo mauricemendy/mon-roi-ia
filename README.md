@@ -117,6 +117,30 @@ function App() {
 - Tailwind CSS
 - shadcn/ui components
 
+### Mesure d'audience (optionnelle)
+
+L'instrumentation cible **Umami auto-hébergé**, sans cookie et sans bandeau de
+consentement. Elle est **inerte par défaut** : sans les deux variables
+ci-dessous, aucun script n'est chargé et aucune requête n'est émise.
+
+```bash
+cp .env.example .env.local   # puis renseigner les deux valeurs
+```
+
+| Variable | Rôle |
+|---|---|
+| `VITE_UMAMI_URL` | URL du serveur Umami |
+| `VITE_UMAMI_WEBSITE_ID` | Identifiant du site dans Umami |
+
+Cinq événements sont relevés : `parcours_demarre`, `etape_franchie`,
+`mesure_affichee`, `affinage_ouvert`, `hypotheses_exportees`.
+
+**Les charges utiles ne transportent aucune donnée identifiante** — uniquement
+le métier, le numéro d'étape et des ordres de grandeur. C'est ce qui maintient
+le dispositif dans les conditions d'exemption de consentement de la CNIL. Une
+mention dans la politique de confidentialité et un moyen de refus restent
+néanmoins dus.
+
 ---
 
 ## 📸 Captures d'écran

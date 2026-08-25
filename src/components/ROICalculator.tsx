@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { track } from "@/lib/analytics";
 import { Clock, ChevronDown, ChevronUp, BookOpen, Download, AlertTriangle, BarChart3, ExternalLink } from "lucide-react";
 
 interface Task {
@@ -238,6 +239,26 @@ export default function ROICalculator() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [refining, setRefining] = useState(false);
 
+  // Un relevé de parcours par visite. Le garde-fou évite le doublon que
+  // StrictMode provoque en développement.
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    track('parcours_demarre');
+  }, []);
+
+  const advanceTo = (next: 1 | 2 | 3) => {
+    setStep(next);
+    track('etape_franchie', { etape: next });
+  };
+
+  const toggleRefining = () => {
+    const open = !refining;
+    setRefining(open);
+    if (open) track('affinage_ouvert', { metier: prof });
+  };
+
   const [prof, setProf] = useState<ProfessionKey>(INITIAL_PROFESSION);
   const [collabs, setCollabs] = useState(5);
   // Le coût se saisit au choix à l'heure ou à l'année. Une seule des deux
@@ -352,6 +373,17 @@ export default function ROICalculator() {
     };
   }, [prof, collabs, effectiveRate, hours, adoptionFactor, customCoefficients]);
 
+  // La mesure elle-même, relevée une fois par métier atteint. Le métier et la
+  // part de temps mesurée sont les deux dimensions dont le baromètre aura
+  // besoin ; l'effectif et le taux restent hors de la mesure d'audience.
+  const measured = useRef<string | null>(null);
+  useEffect(() => {
+    if (step !== 3) return;
+    if (measured.current === prof) return;
+    measured.current = prof;
+    track('mesure_affichee', { metier: prof, part_mesuree: Number(results.percentTotal) });
+  }, [step, prof, results.percentTotal]);
+
   const handleProfessionChange = (newProf: ProfessionKey) => {
     setProf(newProf);
     const newHours: Record<string, number> = {};
@@ -363,6 +395,7 @@ export default function ROICalculator() {
   };
 
   const exportHypotheses = () => {
+    track('hypotheses_exportees', { metier: prof });
     const data = {
       metadata: {
         version: "1.4",
@@ -1490,7 +1523,7 @@ export default function ROICalculator() {
         {step < 3 && (
           <button
             type="button"
-            onClick={() => setStep((step + 1) as 1 | 2 | 3)}
+            onClick={() => advanceTo((step + 1) as 1 | 2 | 3)}
             className="px-4 py-2 rounded-sm bg-ink text-surface text-[13px] font-medium hover:bg-ink-2 transition-colors"
           >
             {step === 1 ? 'Continuer' : 'Voir la mesure'}
@@ -1499,7 +1532,7 @@ export default function ROICalculator() {
         {step === 3 && (
           <button
             type="button"
-            onClick={() => setRefining(!refining)}
+            onClick={() => toggleRefining()}
             aria-pressed={refining}
             className={`px-4 py-2 rounded-sm text-[13px] font-medium transition-colors border ${
               refining
