@@ -1,10 +1,9 @@
 import { useState, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Clock, ChevronDown, ChevronUp, Zap, BookOpen, Download, AlertTriangle, BarChart3, ExternalLink } from "lucide-react";
+import { Clock, ChevronDown, ChevronUp, BookOpen, Download, AlertTriangle, BarChart3, ExternalLink } from "lucide-react";
 
 interface Task {
   id: string;
@@ -172,14 +171,68 @@ const clampNumber = (raw: string, min: number, max: number, fallback: number) =>
 // ne génère que ce qu'il trouve statiquement dans les sources.
 // L'ordre des couleurs suit la légende affichée dans la colonne de configuration.
 const getKColor = (k: number) => {
-  if (k === 0) return { bar: 'bg-slate-400', badge: 'bg-slate-100 text-slate-600', label: 'Non automatisable' };
-  if (k < 0.3) return { bar: 'bg-amber-600', badge: 'bg-amber-50 text-amber-700', label: 'Potentiel faible' };
-  if (k < 0.5) return { bar: 'bg-blue-600', badge: 'bg-blue-50 text-blue-700', label: 'Potentiel moyen' };
-  return { bar: 'bg-emerald-600', badge: 'bg-emerald-50 text-emerald-700', label: 'Fort potentiel' };
+  if (k === 0) return { bar: 'bg-pot-hors', badge: 'bg-sunk text-ink-3', label: 'Hors domaine' };
+  if (k < 0.3) return { bar: 'bg-pot-faible', badge: 'bg-sunk text-ink-2', label: 'Potentiel faible' };
+  if (k < 0.5) return { bar: 'bg-pot-moyen', badge: 'bg-sunk text-ink-2', label: 'Potentiel moyen' };
+  return { bar: 'bg-pot-fort', badge: 'bg-sunk text-ink', label: 'Fort potentiel' };
 };
 
+// Graduations de la règle : un trait tous les 2,5 h, chiffré tous les 5 h.
+// Calées sur le total réellement déclaré, qui n'est pas forcément la semaine
+// de référence — l'utilisateur peut déclarer plus ou moins.
+const rulerTicks = (span: number) =>
+  Array.from(
+    { length: Math.floor(span / 2.5) + 1 },
+    (_, i) => ({ h: i * 2.5, major: (i * 2.5) % 5 === 0 })
+  );
+
+// Séquence d'adoption. Encore identique pour tous : la dériver des réponses
+// (métier, taille d'équipe, adoption) reste à faire — l'écran le dit en clair
+// plutôt que de laisser croire à une recommandation personnalisée.
+const ADOPTION_PHASES = [
+  {
+    title: 'Pilote',
+    weeks: 'S1–S2',
+    items: ['Sélection de 2-3 early adopters', 'Focus sur les tâches k ≥ 0,50', 'Mesure des gains réels']
+  },
+  {
+    title: 'Formation',
+    weeks: 'S3–S4',
+    items: ['Ateliers de prompting', 'Partage des pratiques', "Documentation des cas d'usage"]
+  },
+  {
+    title: 'Déploiement',
+    weeks: 'S5–S8',
+    items: ["Extension à l'équipe complète", 'Support continu', 'Ajustement des workflows']
+  },
+  {
+    title: 'Optimisation',
+    weeks: 'S9–S12',
+    items: ['Analyse du ROI réel', 'Identification de nouvelles tâches', 'Montée en maturité']
+  }
+] as const;
+
+// Les trois groupes repliables de la configuration, dérivés du même barème que
+// la légende — c'est ce qui empêche les deux de rediverger comme auparavant.
+const POTENTIAL_GROUPS = [
+  { bucket: 'high', title: 'Fort potentiel — k ≥ 0,50', bar: 'bg-pot-fort' },
+  { bucket: 'medium', title: 'Potentiel moyen — 0,30 à 0,49', bar: 'bg-pot-moyen' },
+  { bucket: 'low', title: 'Faible ou hors domaine — k < 0,30', bar: 'bg-pot-faible' }
+] as const;
+
+// Bornes de l'échelle, réutilisées par la légende et la décomposition.
+const POTENTIAL_SCALE = [
+  { key: 'fort', bar: 'bg-pot-fort', label: 'Fort', rule: 'k ≥ 0,50' },
+  { key: 'moyen', bar: 'bg-pot-moyen', label: 'Moyen', rule: '0,30 à 0,49' },
+  { key: 'faible', bar: 'bg-pot-faible', label: 'Faible', rule: 'k < 0,30' },
+  { key: 'hors', bar: 'bg-pot-hors', label: 'Hors domaine', rule: 'k = 0' }
+] as const;
+
+type ProfessionKey = keyof typeof PROFESSIONS;
+const INITIAL_PROFESSION: ProfessionKey = 'engineering';
+
 export default function ROICalculator() {
-  const [prof, setProf] = useState('engineering');
+  const [prof, setProf] = useState<ProfessionKey>(INITIAL_PROFESSION);
   const [collabs, setCollabs] = useState(5);
   // Le coût se saisit au choix à l'heure ou à l'année. Une seule des deux
   // valeurs pilote le calcul à la fois — celle du mode actif — et la bascule
@@ -187,9 +240,11 @@ export default function ROICalculator() {
   const [rateMode, setRateMode] = useState<'horaire' | 'annuel'>('horaire');
   const [rate, setRate] = useState(45);
   const [annualCost, setAnnualCost] = useState(Math.round(45 * WORKED_HOURS_PER_YEAR));
+  // Dérivé du métier initial, et non figé sur « engineering » : sinon les
+  // heures d'un métier fuient vers un autre si le défaut change.
   const [hours, setHours] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
-    PROFESSIONS.engineering.tasks.forEach(task => {
+    PROFESSIONS[INITIAL_PROFESSION].tasks.forEach(task => {
       initial[task.id] = task.defaultHours;
     });
     return initial;
@@ -243,15 +298,40 @@ export default function ROICalculator() {
       return acc + (h * k * adoptionFactor);
     }, 0);
 
+    // Borne basse de l'intervalle : on substitue le coefficient observé sur le
+    // terrain là où il existe, et on garde le théorique ailleurs. On ne
+    // décote donc que ce qui a effectivement été mesuré.
+    const hoursPerWeekObserved = currentTasks.reduce((acc, t, i) => {
+      const h = hours[t.id] || t.defaultHours;
+      const k = customCoefficients?.[i] ?? t.realWorld ?? t.k;
+      return acc + (h * k * adoptionFactor);
+    }, 0);
+
     const totalHours = currentTasks.reduce((acc, t) => acc + (hours[t.id] || t.defaultHours), 0);
 
     // Année travaillée, cf. WORKED_WEEKS_PER_YEAR. Le coût de licence, lui,
     // court sur les 12 mois : le rapport gain/coût intègre donc les congés.
     const grossGain = hoursPerWeek * safeRate * WORKED_WEEKS_PER_MONTH * safeCollabs;
+    const grossGainObserved = hoursPerWeekObserved * safeRate * WORKED_WEEKS_PER_MONTH * safeCollabs;
     const totalCost = safeCollabs * licenceCost;
+
+    const sourcedCount = currentTasks.filter(t => t.source).length;
 
     return {
       hoursPerWeek: hoursPerWeek.toFixed(1),
+      // Lecture principale : deux décimales, séparateur français. C'est la
+      // précision que l'affichage revendique, elle doit être tenue.
+      hoursPerWeekPrecise: hoursPerWeek.toLocaleString('fr-FR', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2
+      }),
+      hoursPerWeekFr: hoursPerWeek.toLocaleString('fr-FR', { maximumFractionDigits: 1 }),
+      hoursTeam: (hoursPerWeek * safeCollabs).toLocaleString('fr-FR', { maximumFractionDigits: 1 }),
+      totalHours,
+      grossGain: Math.round(grossGain),
+      netObserved: Math.round(grossGainObserved - totalCost),
+      totalCost,
+      sourcedCount,
+      taskCount: currentTasks.length,
       extraTimeYear: (hoursPerWeek * WORKED_WEEKS_PER_YEAR / HOURS_PER_DAY).toFixed(0),
       percentTime: ((hoursPerWeek / HOURS_PER_WEEK) * 100).toFixed(0),
       percentTotal: totalHours > 0 ? ((hoursPerWeek / totalHours) * 100).toFixed(0) : '0',
@@ -266,10 +346,10 @@ export default function ROICalculator() {
     };
   }, [prof, collabs, effectiveRate, hours, adoptionFactor, customCoefficients]);
 
-  const handleProfessionChange = (newProf: string) => {
+  const handleProfessionChange = (newProf: ProfessionKey) => {
     setProf(newProf);
     const newHours: Record<string, number> = {};
-    PROFESSIONS[newProf as keyof typeof PROFESSIONS].tasks.forEach(task => {
+    PROFESSIONS[newProf].tasks.forEach(task => {
       newHours[task.id] = task.defaultHours;
     });
     setHours(newHours);
@@ -377,96 +457,69 @@ export default function ROICalculator() {
     return { count: tasks.length, hours: totalHours.toFixed(1) };
   };
 
+  // Décomposition par tâche, triée par contribution décroissante. Sert le
+  // tableau à barres du résultat, qui remplace l'ancien « Top 3 ».
+  const breakdown = useMemo(() => {
+    const rows = currentTasks.map((task, i) => {
+      const declared = hours[task.id] ?? task.defaultHours;
+      const k = customCoefficients?.[i] ?? task.k;
+      return { task, declared, k, gain: declared * k * adoptionFactor };
+    });
+    rows.sort((a, b) => b.gain - a.gain);
+    // Échelle de l'axe : la plus forte contribution, arrondie au dixième
+    // supérieur, pour que la barre la plus longue ne touche jamais le bord.
+    const axisMax = Math.max(0.1, Math.ceil(Math.max(...rows.map(r => r.gain)) * 10) / 10);
+    return { rows, axisMax };
+  }, [currentTasks, hours, adoptionFactor, customCoefficients]);
+
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
-  const getDynamicTips = () => {
-    // Calculer le Top 3
-    const top3 = currentTasks
-      .map((task) => ({
-        task,
-        gain: (hours[task.id] || task.defaultHours) * task.k * adoptionFactor,
-      }))
-      .sort((a, b) => b.gain - a.gain)
-      .slice(0, 3);
-
-    const highPotentialCount = top3.filter(item => item.task.k >= 0.5).length;
-    const top1 = top3[0]?.task;
-    const top2 = top3[1]?.task;
-
-    // Tips selon le profil du Top 3.
-    // Les classes sont des littéraux : une classe assemblée à l'exécution
-    // (`text-${color}-600`) ne survit pas au build Tailwind.
-    if (highPotentialCount >= 2) {
-      // 2-3 tâches fort potentiel dans le Top 3
-      const highTasks = top3.filter(item => item.task.k >= 0.5).map(item => item.task.label);
-      return [
-        { arrowClass: 'text-emerald-600', text: `Priorisez ${highTasks[0]} et ${highTasks[1]} (k≥0.5)` },
-        { arrowClass: 'text-blue-600', text: 'ROI immédiat : ces tâches sont vos quick wins' },
-        { arrowClass: 'text-amber-600', text: 'Formez vos équipes sur le prompting efficace' }
-      ];
-    } else if (highPotentialCount === 1) {
-      // 1 seule tâche fort potentiel
-      const highTask = top3.find(item => item.task.k >= 0.5)?.task;
-      return [
-        { arrowClass: 'text-emerald-600', text: `Commencez par ${highTask?.label} (k=${highTask?.k.toFixed(2)})` },
-        { arrowClass: 'text-blue-600', text: `Puis étendez à ${top2?.label} progressivement` },
-        { arrowClass: 'text-amber-600', text: 'Mesurez l\'adoption après 1 mois' }
-      ];
-    } else {
-      // Aucune tâche fort potentiel (ex: Sales)
-      return [
-        { arrowClass: 'text-emerald-600', text: `Focus sur ${top1?.label} et ${top2?.label}` },
-        { arrowClass: 'text-blue-600', text: 'Commencez par 1-2 tâches, puis étendez' },
-        { arrowClass: 'text-amber-600', text: 'Partagez les best practices en équipe' }
-      ];
-    }
-  };
-
   return (
-    <div className="max-w-6xl mx-auto p-4 space-y-6">
-      {/* Slider Adoption */}
-      <Card className="border-slate-200 shadow-sm">
-        <CardContent className="pt-6">
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <Label className="text-sm font-semibold text-slate-700">
-                Facteur d'adoption
-              </Label>
-              <div className="text-right">
-                <div className="text-lg font-bold text-blue-600">{(adoptionFactor * 100).toFixed(0)}%</div>
-                <div className="text-xs text-slate-500">{getAdoptionLabel()}</div>
-              </div>
+    <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+      {/* Réglage d'adoption */}
+      <div className="border border-rule-firm bg-surface rounded-sm px-5 py-4">
+        <div className="space-y-3">
+          <div className="flex justify-between items-baseline gap-3">
+            <Label className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4">
+              Facteur d'adoption
+            </Label>
+            <div className="text-right">
+              <span className="font-mono text-[15px] font-medium text-ink tabular-nums">
+                {(adoptionFactor * 100).toFixed(0)} %
+              </span>
+              <span className="text-[11.5px] text-ink-3 ml-2">{getAdoptionLabel()}</span>
             </div>
-            <Slider 
-              value={[adoptionFactor * 100]} 
-              min={50} 
-              max={100} 
-              step={5}
-              onValueChange={(val) => setAdoptionFactor(val[0] / 100)} 
-            />
-            <p className="text-xs text-slate-500 italic">
-              Intègre le temps de validation humaine, la courbe d'apprentissage et le taux d'utilisation effectif.
-            </p>
           </div>
-        </CardContent>
-      </Card>
+          <Slider
+            value={[adoptionFactor * 100]}
+            min={50}
+            max={100}
+            step={5}
+            onValueChange={(val) => setAdoptionFactor(val[0] / 100)}
+          />
+          <p className="text-[11.5px] text-ink-3 leading-snug">
+            Intègre le temps de validation humaine, la courbe d'apprentissage et le taux d'utilisation
+            effectif.
+          </p>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
+
         {/* GAUCHE : CONFIGURATION */}
         <div className="lg:col-span-5 space-y-6">
-          <Card className="border-slate-200 shadow-sm">
-            <CardHeader className="border-b bg-slate-50/50">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Zap className="w-5 h-5 text-amber-500" /> Configuration
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6 space-y-6">
+          <div className="border border-rule-firm bg-surface rounded-sm">
+            <div className="px-5 py-3 border-b border-rule-firm bg-sunk">
+              <span className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4">
+                Conditions saisies
+              </span>
+            </div>
+            <div className="p-5 space-y-6">
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label className="text-xs uppercase font-bold text-slate-500">Métier</Label>
+                  <Label className="text-xs uppercase font-bold text-ink-3">Métier</Label>
                   <Select onValueChange={handleProfessionChange} defaultValue={prof}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
@@ -481,7 +534,7 @@ export default function ROICalculator() {
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label className="text-xs uppercase font-bold text-slate-500">Utilisateurs</Label>
+                    <Label className="text-xs uppercase font-bold text-ink-3">Utilisateurs</Label>
                     <Input
                       type="number"
                       min={1}
@@ -493,18 +546,18 @@ export default function ROICalculator() {
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <Label className="text-xs uppercase font-bold text-slate-500">
+                      <Label className="text-xs uppercase font-bold text-ink-3">
                         {rateMode === 'horaire' ? 'Taux horaire (€)' : 'Coût annuel (€)'}
                       </Label>
-                      <div className="flex rounded border border-slate-200 overflow-hidden shrink-0">
+                      <div className="flex rounded border border-rule overflow-hidden shrink-0">
                         <button
                           type="button"
                           aria-pressed={rateMode === 'horaire'}
                           onClick={() => switchRateMode('horaire')}
                           className={`px-2 py-0.5 text-[10px] font-semibold transition-colors ${
                             rateMode === 'horaire'
-                              ? 'bg-slate-800 text-white'
-                              : 'bg-white text-slate-500 hover:bg-slate-50'
+                              ? 'bg-ink text-white'
+                              : 'bg-surface text-ink-3 hover:bg-sunk'
                           }`}
                         >
                           /h
@@ -513,10 +566,10 @@ export default function ROICalculator() {
                           type="button"
                           aria-pressed={rateMode === 'annuel'}
                           onClick={() => switchRateMode('annuel')}
-                          className={`px-2 py-0.5 text-[10px] font-semibold transition-colors border-l border-slate-200 ${
+                          className={`px-2 py-0.5 text-[10px] font-semibold transition-colors border-l border-rule ${
                             rateMode === 'annuel'
-                              ? 'bg-slate-800 text-white'
-                              : 'bg-white text-slate-500 hover:bg-slate-50'
+                              ? 'bg-ink text-white'
+                              : 'bg-surface text-ink-3 hover:bg-sunk'
                           }`}
                         >
                           /an
@@ -546,7 +599,7 @@ export default function ROICalculator() {
                       />
                     )}
 
-                    <p className="text-[10px] text-slate-500 leading-snug">
+                    <p className="text-[10px] text-ink-3 leading-snug">
                       {rateMode === 'horaire' ? (
                         <>
                           soit <strong>{Math.round(derivedAnnualCost).toLocaleString('fr-FR')} €</strong> de
@@ -569,464 +622,462 @@ export default function ROICalculator() {
                 </div>
               </div>
 
-              <div className="pt-6 border-t space-y-6">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs uppercase font-bold text-slate-500 flex items-center gap-2">
-                    <Clock className="w-4 h-4" /> Temps hebdomadaire / tâche
+              <div className="pt-6 border-t border-rule space-y-5">
+                <div className="flex items-center justify-between gap-3">
+                  <Label className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4 flex items-center gap-2">
+                    <Clock className="w-3.5 h-3.5" /> Temps hebdomadaire / tâche
                   </Label>
-                  <div className="text-xs text-slate-500">37.5h total</div>
-                </div>
-
-                {/* Légende couleurs */}
-                <div className="bg-slate-50 p-3 rounded-lg space-y-2 text-xs">
-                  <div className="font-semibold text-slate-700">Potentiel IA :</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded bg-emerald-600"></div>
-                      <span>Fort (k≥0.5)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded bg-blue-600"></div>
-                      <span>Moyen (0.3-0.5)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded bg-amber-600"></div>
-                      <span>Faible (&lt;0.3)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded bg-slate-400"></div>
-                      <span>Non auto.</span>
-                    </div>
+                  <div className="font-mono text-[11px] text-ink-3 tabular-nums shrink-0">
+                    {results.totalHours.toLocaleString('fr-FR')} h déclarées
                   </div>
                 </div>
 
-                {/* SECTION FORT POTENTIEL */}
-                <div className="space-y-3">
-                  <button
-                    onClick={() => toggleSection('high')}
-                    className="w-full flex items-center justify-between p-3 bg-emerald-50 border-2 border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center text-white">
-                        {expandedSections.high ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                      </div>
-                      <div className="text-left">
-                        <div className="font-bold text-emerald-900">Fort potentiel (k≥0.5)</div>
-                        <div className="text-xs text-emerald-700">
-                          {getSectionStats(tasksByPotential.high).count} tâches • {getSectionStats(tasksByPotential.high).hours}h/sem
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-
-                  {expandedSections.high && (
-                    <div className="space-y-4 pl-2">
-                      {tasksByPotential.high.map((task) => {
-                        const color = getKColor(task.k);
-                        return (
-                          <div key={task.id} className="relative">
-                            <div className={`absolute left-0 top-0 bottom-0 w-1 ${color.bar} rounded-l-lg`}></div>
-                            <div className="ml-4 bg-white border border-slate-200 rounded-lg p-3 space-y-3">
-                              <div className="flex justify-between items-start gap-3">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm font-medium text-slate-800">{task.label}</span>
-                                    <span title={color.label} className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${color.badge}`}>
-                                      k={task.k.toFixed(2)}
-                                    </span>
-                                  </div>
-                                  <span className="text-xs text-slate-500">({task.percentage})</span>
-                                </div>
-                                <span className="text-sm font-bold text-blue-600 shrink-0">{hours[task.id] || task.defaultHours}h</span>
-                              </div>
-                              <Slider 
-                                value={[hours[task.id] || task.defaultHours]} 
-                                max={20} 
-                                step={0.5}
-                                onValueChange={(val) => setHours({...hours, [task.id]: val[0]})} 
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                {/* Légende de l'échelle — une seule source, celle du barème */}
+                <div className="bg-sunk border border-rule rounded-sm p-3 space-y-2">
+                  <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-ink-4">
+                    Échelle de potentiel
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11.5px] text-ink-3">
+                    {POTENTIAL_SCALE.map(step => (
+                      <span key={step.key} className="flex items-center gap-2">
+                        <span className={`w-4 h-2 rounded-r-sm shrink-0 ${step.bar}`} />
+                        {step.label} <span className="font-mono text-ink-4">{step.rule}</span>
+                      </span>
+                    ))}
+                  </div>
                 </div>
 
-                {/* SECTION POTENTIEL MOYEN */}
-                <div className="space-y-3">
-                  <button
-                    onClick={() => toggleSection('medium')}
-                    className="w-full flex items-center justify-between p-3 bg-blue-50 border-2 border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white">
-                        {expandedSections.medium ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                      </div>
-                      <div className="text-left">
-                        <div className="font-bold text-blue-900">Potentiel moyen (0.3-0.5)</div>
-                        <div className="text-xs text-blue-700">
-                          {getSectionStats(tasksByPotential.medium).count} tâches • {getSectionStats(tasksByPotential.medium).hours}h/sem
-                        </div>
-                      </div>
-                    </div>
-                  </button>
+                {/* Les trois groupes, dérivés du même barème que la légende */}
+                {POTENTIAL_GROUPS.map(group => {
+                  const groupTasks = tasksByPotential[group.bucket];
+                  if (groupTasks.length === 0) return null;
+                  const stats = getSectionStats(groupTasks);
+                  const open = expandedSections[group.bucket];
+                  return (
+                    <div key={group.bucket} className="space-y-2">
+                      <button
+                        onClick={() => toggleSection(group.bucket)}
+                        aria-expanded={open}
+                        className="w-full flex items-center gap-3 p-3 bg-surface border border-rule-firm rounded-sm hover:bg-sunk transition-colors text-left"
+                      >
+                        <span className={`w-1 self-stretch rounded-sm shrink-0 ${group.bar}`} />
+                        <span className="flex-1">
+                          <span className="block text-[13px] font-semibold text-ink">{group.title}</span>
+                          <span className="block font-mono text-[11px] text-ink-3">
+                            {stats.count} {stats.count > 1 ? 'tâches' : 'tâche'} · {stats.hours} h/sem
+                          </span>
+                        </span>
+                        {open
+                          ? <ChevronUp className="w-4 h-4 text-ink-4 shrink-0" />
+                          : <ChevronDown className="w-4 h-4 text-ink-4 shrink-0" />}
+                      </button>
 
-                  {expandedSections.medium && (
-                    <div className="space-y-4 pl-2">
-                      {tasksByPotential.medium.map((task) => {
-                        const color = getKColor(task.k);
-                        return (
-                          <div key={task.id} className="relative">
-                            <div className={`absolute left-0 top-0 bottom-0 w-1 ${color.bar} rounded-l-lg`}></div>
-                            <div className="ml-4 bg-white border border-slate-200 rounded-lg p-3 space-y-3">
-                              <div className="flex justify-between items-start gap-3">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm font-medium text-slate-800">{task.label}</span>
-                                    <span title={color.label} className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${color.badge}`}>
-                                      k={task.k.toFixed(2)}
+                      {open && (
+                        <div className="space-y-2 pl-3">
+                          {groupTasks.map((task) => {
+                            const color = getKColor(task.k);
+                            const declared = hours[task.id] ?? task.defaultHours;
+                            return (
+                              <div key={task.id} className="flex gap-3">
+                                <span className={`w-0.5 rounded-sm shrink-0 ${color.bar}`} />
+                                <div className="flex-1 bg-surface border border-rule rounded-sm p-3 space-y-2.5">
+                                  <div className="flex justify-between items-start gap-3">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-[13px] text-ink">{task.label}</span>
+                                        <span
+                                          title={color.label}
+                                          className={`text-[10px] px-1.5 py-px rounded-sm font-mono tabular-nums ${color.badge}`}
+                                        >
+                                          k {task.k.toFixed(2).replace('.', ',')}
+                                        </span>
+                                      </div>
+                                      <span className="font-mono text-[11px] text-ink-4">{task.percentage} du temps</span>
+                                    </div>
+                                    <span className="font-mono text-[13px] font-medium text-ink shrink-0 tabular-nums">
+                                      {declared.toLocaleString('fr-FR')} h
                                     </span>
                                   </div>
-                                  <span className="text-xs text-slate-500">({task.percentage})</span>
+                                  <Slider
+                                    value={[declared]}
+                                    max={20}
+                                    step={0.5}
+                                    onValueChange={(val) => setHours({ ...hours, [task.id]: val[0] })}
+                                  />
                                 </div>
-                                <span className="text-sm font-bold text-blue-600 shrink-0">{hours[task.id] || task.defaultHours}h</span>
                               </div>
-                              <Slider 
-                                value={[hours[task.id] || task.defaultHours]} 
-                                max={20} 
-                                step={0.5}
-                                onValueChange={(val) => setHours({...hours, [task.id]: val[0]})} 
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* SECTION FAIBLE/NON AUTO */}
-                <div className="space-y-3">
-                  <button
-                    onClick={() => toggleSection('low')}
-                    className="w-full flex items-center justify-between p-3 bg-amber-50 border-2 border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-amber-600 flex items-center justify-center text-white">
-                        {expandedSections.low ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                      </div>
-                      <div className="text-left">
-                        <div className="font-bold text-amber-900">Faible / Non automatisable</div>
-                        <div className="text-xs text-amber-700">
-                          {getSectionStats(tasksByPotential.low).count} tâches • {getSectionStats(tasksByPotential.low).hours}h/sem
+                            );
+                          })}
                         </div>
-                      </div>
+                      )}
                     </div>
-                  </button>
-
-                  {expandedSections.low && (
-                    <div className="space-y-4 pl-2">
-                      {tasksByPotential.low.map((task) => {
-                        const color = getKColor(task.k);
-                        return (
-                          <div key={task.id} className="relative">
-                            <div className={`absolute left-0 top-0 bottom-0 w-1 ${color.bar} rounded-l-lg`}></div>
-                            <div className="ml-4 bg-white border border-slate-200 rounded-lg p-3 space-y-3">
-                              <div className="flex justify-between items-start gap-3">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm font-medium text-slate-800">{task.label}</span>
-                                    <span title={color.label} className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${color.badge}`}>
-                                      k={task.k.toFixed(2)}
-                                    </span>
-                                  </div>
-                                  <span className="text-xs text-slate-500">({task.percentage})</span>
-                                </div>
-                                <span className="text-sm font-bold text-blue-600 shrink-0">{hours[task.id] || task.defaultHours}h</span>
-                              </div>
-                              <Slider 
-                                value={[hours[task.id] || task.defaultHours]} 
-                                max={20} 
-                                step={0.5}
-                                onValueChange={(val) => setHours({...hours, [task.id]: val[0]})} 
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                  );
+                })}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
 
         {/* DROITE : RESULTATS */}
         <div className="lg:col-span-7 flex flex-col gap-6">
           
-          {/* GAIN UTILISATEUR */}
-          <Card className="flex-1 border-slate-200 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs uppercase tracking-widest text-blue-600 font-bold">
-                Temps libéré / personne
-              </CardTitle>
-              <div className="text-xs text-slate-500 italic mt-1">
-                Facteur d'adoption : {(adoptionFactor * 100).toFixed(0)}%
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <span className="text-5xl font-black text-slate-900">{results.hoursPerWeek}h</span>
-                <span className="text-xl font-bold text-slate-400 ml-2">/ semaine</span>
-              </div>
-              <div className="pt-4 border-t">
-                <div className="text-xs uppercase font-bold text-slate-400 mb-2 tracking-tighter">Équivalences</div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg">
-                    <div className="text-lg font-bold text-slate-800">+{results.extraTimeYear} jours</div>
-                    <div className="text-xs text-slate-500">libérés par an / pers.</div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg">
-                    <div className="text-lg font-bold text-slate-800">{results.percentTime}%</div>
-                    <div className="text-xs text-slate-500">du temps hebdo libéré</div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Disclaimer */}
-              <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg mt-4">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <div className="text-xs font-bold text-amber-800 uppercase tracking-wide mb-1">
-                      Hypothèse
-                    </div>
-                    <div className="text-xs text-amber-700">
-                      {results.percentTotal}% de votre temps est potentiellement automatisable selon votre configuration. 
-                      Les résultats réels varient selon le contexte.
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {/* ===== INSTRUMENT : LECTURE ===== */}
+          <div className="border border-rule-firm bg-surface rounded-sm">
 
-          {/* IMPACT DÉCIDEUR */}
-          <Card className="flex-1 border-slate-200 shadow-sm bg-slate-900 text-white">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs uppercase tracking-widest text-emerald-400 font-bold">
-                Valeur du temps libéré
-              </CardTitle>
-              <div className="text-xs text-slate-400 italic mt-1">
-                Hypothèses moyennes secteur {PROFESSIONS[prof as keyof typeof PROFESSIONS].label}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div>
-                <div className="text-5xl font-black text-white">{formatEuro(results.net)}</div>
-                <div className="text-sm text-slate-400 mt-1 uppercase tracking-wide">
-                  Valeur mensuelle du temps libéré — équipe
-                </div>
-                <div className="text-xs text-slate-400 mt-3 leading-relaxed">
-                  <strong className="text-slate-200">Ce n'est pas une économie.</strong> À effectif constant,
-                  aucun euro n'entre en caisse : ce sont des heures réallouées, valorisées au taux horaire
-                  que vous avez saisi. Net du coût des licences.
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-8 pt-6 border-t border-white/10">
-                <div>
-                  <div className="text-3xl font-bold text-emerald-400">
-                    {results.roi === '—' ? '—' : `x${results.roi}`}
-                  </div>
-                  <div className="text-[10px] uppercase font-bold text-slate-500 tracking-widest">ROI Théorique</div>
-                </div>
-                <div>
-                  <div className="text-3xl font-bold text-white">{results.breakeven}</div>
-                  <div className="text-[10px] uppercase font-bold text-slate-500 tracking-widest">Break-even (Seuil)</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+            {/* Identification du relevé */}
+            <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 px-5 py-3 border-b border-rule-firm bg-sunk">
+              <span className="text-[13px] font-semibold text-ink tracking-tight">
+                {PROFESSIONS[prof as keyof typeof PROFESSIONS].label}
+              </span>
+              <span className="font-mono text-[11.5px] text-ink-3">
+                <b className="font-medium text-ink-2">{collabs}</b> {collabs > 1 ? 'personnes' : 'personne'}
+              </span>
+              <span className="font-mono text-[11.5px] text-ink-3">
+                <b className="font-medium text-ink-2">
+                  {effectiveRate.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} €
+                </b>/h chargé
+              </span>
+              <span className="font-mono text-[11.5px] text-ink-3">
+                adoption <b className="font-medium text-ink-2">{(adoptionFactor * 100).toFixed(0)} %</b>
+              </span>
+            </div>
 
-          {/* TOP OPPORTUNITÉS IA */}
-          <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50 to-blue-50">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2 text-emerald-700">
-                <Zap className="w-4 h-4" /> Top Opportunités IA
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Top 3 tâches */}
-              <div className="space-y-2">
-                {currentTasks
-                  .map((task, idx) => ({
-                    task,
-                    gain: (hours[task.id] || task.defaultHours) * task.k * adoptionFactor,
-                    originalIndex: idx
-                  }))
-                  .sort((a, b) => b.gain - a.gain)
-                  .slice(0, 3)
-                  .map(({ task, gain }, rank) => {
-                    const color = getKColor(task.k);
-                    return (
-                      <div key={task.id} className="flex items-center gap-3 bg-white p-2 rounded-lg border border-slate-200">
-                        <div className={`w-6 h-6 rounded-full ${color.bar} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
-                          {rank + 1}
+            {/* Lecture principale + règle graduée */}
+            <div className="px-5 py-6 border-b border-rule">
+              <div className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4 mb-4">
+                Lecture principale — temps libéré
+              </div>
+              <div className="flex items-baseline gap-3 flex-wrap">
+                <span className="font-mono text-[clamp(40px,8vw,60px)] font-medium leading-none text-ink tracking-tight tabular-nums">
+                  {results.hoursPerWeekPrecise}
+                </span>
+                <span className="text-[15px] text-ink-3">h / semaine / personne</span>
+                <span className="ml-auto text-right text-[11.5px] text-ink-3 leading-snug">
+                  <b className="block font-medium text-ink-2">
+                    sur {results.totalHours.toLocaleString('fr-FR')} h déclarées
+                  </b>
+                  soit {results.percentTotal} % du temps déclaré
+                </span>
+              </div>
+
+              {/* La règle : un chiffre avec sa référence, plutôt qu'une barre de progression */}
+              <div className="mt-6" aria-hidden="true">
+                <div className="relative h-6 bg-sunk border border-rule rounded-[1px]">
+                  <div
+                    className="absolute left-0 top-0 bottom-0 bg-gauge rounded-r-[1px]"
+                    style={{ width: `${Math.min(100, Number(results.percentTotal))}%` }}
+                  />
+                  <div
+                    className="absolute -top-[7px] -bottom-[7px] w-px bg-ink"
+                    style={{ left: `${Math.min(100, Number(results.percentTotal))}%` }}
+                  />
+                </div>
+                <div className="relative h-6 mt-px">
+                  {rulerTicks(results.totalHours).map(({ h, major }) => (
+                    <div key={h}>
+                      <div
+                        className={`absolute top-0 w-px ${major ? 'h-2 bg-ink-4' : 'h-1 bg-rule-firm'}`}
+                        style={{ left: `${(h / results.totalHours) * 100}%` }}
+                      />
+                      {major && (
+                        <div
+                          className="absolute top-[10px] -translate-x-1/2 font-mono text-[10px] text-ink-4"
+                          style={{ left: `${(h / results.totalHours) * 100}%` }}
+                        >
+                          {h}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-semibold text-slate-800 truncate">{task.label}</div>
-                          <div className="text-[10px] text-slate-500">
-                            {gain.toFixed(1)}h/sem potentiel • k={task.k.toFixed(2)}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-
-              {/* Insight temps automatisable */}
-              <div className="bg-white/60 backdrop-blur p-3 rounded-lg border border-emerald-200">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-semibold text-slate-700">Temps automatisable</span>
-                  <span className="text-lg font-bold text-emerald-700">{results.percentTotal}%</span>
-                </div>
-                <div className="w-full bg-slate-200 rounded-full h-2">
-                  <div 
-                    className="bg-gradient-to-r from-emerald-500 to-blue-500 h-2 rounded-full transition-all"
-                    style={{ width: `${results.percentTotal}%` }}
-                  ></div>
-                </div>
-              </div>
-
-              {/* Tips rapides */}
-              <div className="space-y-2">
-                <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">💡 Tips</div>
-                <div className="space-y-1.5 text-xs text-slate-700">
-                  {getDynamicTips().map((tip, idx) => (
-                    <div key={idx} className="flex items-start gap-2">
-                      <span className={`${tip.arrowClass} shrink-0`}>→</span>
-                      <span>{tip.text}</span>
+                      )}
                     </div>
                   ))}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* ROADMAP ADOPTION */}
-          <Card className="border-purple-200 bg-gradient-to-br from-purple-50 to-pink-50">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2 text-purple-700">
-                <Clock className="w-4 h-4" /> Roadmap Adoption (3 mois)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {/* Phase 1 */}
-                <div className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-white text-xs font-bold">
-                      1
-                    </div>
-                    <div className="w-0.5 h-full bg-purple-200 mt-1"></div>
-                  </div>
-                  <div className="flex-1 pb-3">
-                    <div className="font-semibold text-sm text-slate-800">Pilote (S1-2)</div>
-                    <div className="text-xs text-slate-600 mt-1">
-                      • Sélection 2-3 early adopters<br/>
-                      • Focus sur tâches k≥0.5<br/>
-                      • Mesure gains réels
-                    </div>
-                  </div>
-                </div>
-
-                {/* Phase 2 */}
-                <div className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
-                      2
-                    </div>
-                    <div className="w-0.5 h-full bg-blue-200 mt-1"></div>
-                  </div>
-                  <div className="flex-1 pb-3">
-                    <div className="font-semibold text-sm text-slate-800">Formation (S3-4)</div>
-                    <div className="text-xs text-slate-600 mt-1">
-                      • Workshops prompting<br/>
-                      • Partage best practices<br/>
-                      • Documentation cas d'usage
-                    </div>
-                  </div>
-                </div>
-
-                {/* Phase 3 */}
-                <div className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <div className="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xs font-bold">
-                      3
-                    </div>
-                    <div className="w-0.5 h-full bg-emerald-200 mt-1"></div>
-                  </div>
-                  <div className="flex-1 pb-3">
-                    <div className="font-semibold text-sm text-slate-800">Déploiement (S5-8)</div>
-                    <div className="text-xs text-slate-600 mt-1">
-                      • Extension équipe complète<br/>
-                      • Support continu<br/>
-                      • Ajustements workflows
-                    </div>
-                  </div>
-                </div>
-
-                {/* Phase 4 */}
-                <div className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <div className="w-8 h-8 rounded-full bg-amber-600 flex items-center justify-center text-white text-xs font-bold">
-                      4
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-semibold text-sm text-slate-800">Optimisation (S9-12)</div>
-                    <div className="text-xs text-slate-600 mt-1">
-                      • Analyse ROI réel<br/>
-                      • Identification nouvelles tâches<br/>
-                      • Montée en maturité
-                    </div>
-                  </div>
+                <div className="flex justify-between items-baseline mt-1.5 text-[11.5px] text-ink-3 gap-3">
+                  <span className="font-mono font-medium text-ink">0 h</span>
+                  <span className="text-center">Le reste de la semaine n'est pas adressé par cette mesure</span>
+                  <span className="font-mono font-medium text-ink">
+                    {results.totalHours.toLocaleString('fr-FR')} h
+                  </span>
                 </div>
               </div>
+            </div>
 
-              {/* CTA */}
-              <div className="mt-4 p-3 bg-white/60 backdrop-blur rounded-lg border border-purple-200">
-                <div className="text-xs font-semibold text-purple-700 mb-1">
-                  🎯 Objectif 3 mois
+            {/* Lectures dérivées */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 border-b border-rule">
+              <div className="px-5 py-4 border-b sm:border-b-0 sm:border-r border-rule">
+                <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-ink-4 mb-1.5">
+                  Sur l'année
                 </div>
-                <div className="text-xs text-slate-700">
-                  Atteindre {(adoptionFactor * 100).toFixed(0)}% d'adoption et mesurer les gains réels
+                <div className="font-mono text-[22px] font-medium text-ink leading-none tabular-nums">
+                  {results.extraTimeYear} <span className="text-[13px] text-ink-3">jours</span>
+                </div>
+                <div className="text-[11px] text-ink-3 mt-1.5">
+                  par personne, sur {WORKED_WEEKS_PER_YEAR} semaines travaillées
                 </div>
               </div>
-            </CardContent>
-          </Card>
+              <div className="px-5 py-4 border-b sm:border-b-0 sm:border-r border-rule">
+                <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-ink-4 mb-1.5">
+                  Équipe entière
+                </div>
+                <div className="font-mono text-[22px] font-medium text-ink leading-none tabular-nums">
+                  {results.hoursTeam} <span className="text-[13px] text-ink-3">h/sem</span>
+                </div>
+                <div className="text-[11px] text-ink-3 mt-1.5">
+                  {collabs} × {results.hoursPerWeekFr} h
+                </div>
+              </div>
+              <div className="px-5 py-4">
+                <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-ink-4 mb-1.5">
+                  Rapport valeur / coût
+                </div>
+                <div className="font-mono text-[22px] font-medium text-ink leading-none tabular-nums">
+                  {results.roi === '—' ? '—' : `× ${Math.round(Number(results.roi))}`}
+                </div>
+                <div className="text-[11px] text-ink-3 mt-1.5">
+                  {formatEuro(results.grossGain)} pour {formatEuro(results.totalCost)} de licences
+                </div>
+              </div>
+            </div>
+
+            {/* Valeur, en intervalle plutôt qu'en chiffre unique */}
+            <div className="px-5 py-5 border-b border-rule">
+              <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-ink-4 mb-1.5">
+                Valeur mensuelle du temps libéré — équipe
+              </div>
+              <div className="font-mono text-[26px] font-medium text-ink leading-none tabular-nums">
+                {formatEuro(results.netObserved)}
+                <span className="text-[15px] text-ink-3 mx-1.5">à</span>
+                {formatEuro(results.net)}
+              </div>
+              <div className="text-[11px] text-ink-3 mt-3 leading-relaxed">
+                Borne haute : coefficients théoriques. Borne basse : coefficients observés sur le terrain,
+                substitués aux théoriques là où ils existent. Net de {formatEuro(results.totalCost)} de
+                licences, prélevées 12 mois sur 12.
+                <br />
+                <b className="text-ink-2 font-semibold">Ce n'est pas une économie</b> : à effectif constant,
+                aucun euro n'entre en caisse — ce sont des heures réallouées, valorisées au taux horaire
+                que vous avez saisi.
+              </div>
+            </div>
+
+            {/* Décomposition par tâche */}
+            <div className="px-5 py-5 border-b border-rule">
+              <div className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4 mb-3">
+                Décomposition par tâche — contribution au temps libéré
+              </div>
+              <p className="text-[11.5px] text-ink-3 leading-snug mb-3">
+                Chaque barre est le produit heures × coefficient × adoption. Le carré indique la provenance
+                du coefficient : <span className="inline-block w-[7px] h-[7px] align-[1px] border border-ink-3 bg-ink-3" />{' '}
+                plein = étude publiée,{' '}
+                <span className="inline-block w-[7px] h-[7px] align-[1px] border border-ink-3" /> vide =
+                estimation raisonnée.
+              </p>
+
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse min-w-[420px]">
+                  <thead>
+                    <tr>
+                      <th scope="col" className="text-left text-[10px] font-semibold tracking-[0.08em] uppercase text-ink-4 pb-2 pr-2 border-b border-rule-firm whitespace-nowrap">
+                        Tâche
+                      </th>
+                      <th scope="col" className="text-left text-[10px] font-semibold tracking-[0.08em] uppercase text-ink-4 pb-2 pr-3 border-b border-rule-firm w-[38%]">
+                        Contribution
+                      </th>
+                      <th scope="col" className="text-right text-[10px] font-semibold tracking-[0.08em] uppercase text-ink-4 pb-2 border-b border-rule-firm whitespace-nowrap">
+                        h/sem
+                      </th>
+                      <th scope="col" className="text-right text-[10px] font-semibold tracking-[0.08em] uppercase text-ink-4 pb-2 pl-3 border-b border-rule-firm whitespace-nowrap">
+                        h décl.
+                      </th>
+                      <th scope="col" className="text-right text-[10px] font-semibold tracking-[0.08em] uppercase text-ink-4 pb-2 pl-3 border-b border-rule-firm whitespace-nowrap">
+                        k
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {breakdown.rows.map(({ task, declared, k, gain }) => {
+                      const color = getKColor(k);
+                      return (
+                        <tr key={task.id} className="hover:bg-sunk transition-colors">
+                          <td className="py-2 pr-2 border-b border-rule text-[13px] text-ink align-middle">
+                            {task.label}
+                            <span
+                              title={task.source ? `Source : ${task.source}` : 'Estimation raisonnée, non sourcée'}
+                              className={`inline-block w-[7px] h-[7px] ml-1.5 align-[1px] border border-ink-3 ${
+                                task.source ? 'bg-ink-3' : ''
+                              }`}
+                            />
+                          </td>
+                          <td className="py-2 pr-3 border-b border-rule align-middle">
+                            <div className="relative h-[11px]">
+                              <div
+                                className={`absolute left-0 top-0 bottom-0 rounded-r ${color.bar}`}
+                                style={{ width: `${(gain / breakdown.axisMax) * 100}%` }}
+                              />
+                            </div>
+                          </td>
+                          <td className="py-2 border-b border-rule text-right font-mono text-[12.5px] font-medium text-ink tabular-nums whitespace-nowrap">
+                            {gain.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-2 pl-3 border-b border-rule text-right font-mono text-[12.5px] text-ink-2 tabular-nums whitespace-nowrap">
+                            {declared.toLocaleString('fr-FR')}
+                          </td>
+                          <td className="py-2 pl-3 border-b border-rule text-right font-mono text-[12.5px] text-ink-2 tabular-nums whitespace-nowrap">
+                            {k.toFixed(2).replace('.', ',')}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex flex-wrap gap-x-5 gap-y-1.5 mt-4 pt-3 border-t border-rule text-[11.5px] text-ink-3">
+                {POTENTIAL_SCALE.map(step => (
+                  <span key={step.key} className="flex items-center gap-2">
+                    <span className={`w-4 h-2 rounded-r-sm shrink-0 ${step.bar}`} />
+                    {step.label} — {step.rule}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Conditions de mesure — sur l'écran, pas dans un accordéon */}
+            <div className="px-5 py-5 border-b border-rule">
+              <div className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4 mb-3">
+                Conditions de mesure
+              </div>
+              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3.5">
+                {[
+                  { t: 'Semaine de référence', v: `${HOURS_PER_WEEK.toLocaleString('fr-FR')} h` },
+                  { t: 'Année travaillée', v: `${WORKED_WEEKS_PER_YEAR} sem.`, n: '(52 − 5 de congés)' },
+                  { t: 'Facteur mensuel', v: WORKED_WEEKS_PER_MONTH.toFixed(2).replace('.', ','), n: `(${WORKED_WEEKS_PER_YEAR} / 12)` },
+                  { t: 'Licence', v: '30 €/mois', n: '× 12 mois' },
+                  { t: "Facteur d'adoption", v: adoptionFactor.toFixed(2).replace('.', ',') },
+                  { t: 'Coefficients', v: `${results.sourcedCount} sourcés`, n: `· ${results.taskCount - results.sourcedCount} estimés` }
+                ].map(item => (
+                  <div key={item.t}>
+                    <dt className="text-[10px] tracking-[0.08em] uppercase text-ink-4 mb-0.5">{item.t}</dt>
+                    <dd className="font-mono text-[13px] text-ink tabular-nums">
+                      {item.v}
+                      {item.n && <span className="font-sans text-[11px] text-ink-3 ml-1">{item.n}</span>}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="text-[11.5px] text-ink-4 leading-relaxed mt-4">
+                Le gain court sur {WORKED_WEEKS_PER_YEAR} semaines, la licence sur 12 mois : chacun à sa
+                cadence réelle, ramenés à la même année. Ces {WORKED_WEEKS_PER_YEAR} semaines ne déduisent
+                ni les jours fériés ni les RTT — l'estimation reste un majorant à ce titre. Le taux horaire
+                est un coût chargé rapporté aux heures <em>travaillées</em>.
+                <br />
+                <br />
+                Coefficients issus de Dell'Acqua et al., Noy &amp; Zhang, Brynjolfsson et al. et Peng et al.,
+                tous publiés en 2023 en contexte GPT-4.{' '}
+                <b className="text-ink-3 font-semibold">À revoir</b> : ils ne reflètent pas les modèles ni
+                les usages agentiques actuels.
+              </p>
+            </div>
+
+            {/* Domaine de validité */}
+            <div className="px-5 py-5">
+              <div className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4 mb-3">
+                Domaine de validité
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 border border-rule">
+                <div className="p-4 text-[12.5px] text-ink-3 leading-relaxed border-b sm:border-b-0 sm:border-r border-rule">
+                  <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-gauge-ink mb-1.5">
+                    Ce que cette mesure couvre
+                  </div>
+                  <b className="text-ink-2 font-semibold">L'assistance individuelle.</b> Des personnes qui
+                  gardent leurs tâches et vont plus vite avec une licence par siège. Unité : l'heure de
+                  collaborateur.
+                </div>
+                <div className="p-4 text-[12.5px] text-ink-3 leading-relaxed">
+                  <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-ink-4 mb-1.5">
+                    Ce qu'elle ne couvre pas
+                  </div>
+                  <b className="text-ink-2 font-semibold">L'automatisation de processus</b>, où la tâche sort
+                  du périmètre humain : ni heures ni effectif, mais un volume de transactions, un coût de
+                  construction et un coût par exécution. Un autre instrument est nécessaire.
+                </div>
+              </div>
+              <p className="text-[11.5px] text-ink-4 leading-relaxed mt-3">
+                Non comptabilisé par ailleurs : formation initiale, courbe d'apprentissage, setup technique,
+                maintenance des prompts, résistance organisationnelle.
+              </p>
+            </div>
+          </div>
+
+          {/* SÉQUENCE D'ADOPTION — contenu encore générique, cf. commentaire ADOPTION_PHASES */}
+          <div className="border border-rule-firm bg-surface rounded-sm">
+            <div className="px-5 py-3 border-b border-rule-firm bg-sunk flex items-center gap-2">
+              <Clock className="w-3.5 h-3.5 text-ink-4" />
+              <span className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4">
+                Séquence d'adoption — 3 mois
+              </span>
+            </div>
+            <div className="p-5">
+              <ol className="space-y-0">
+                {ADOPTION_PHASES.map((phase, i) => (
+                  <li key={phase.title} className="flex gap-3.5">
+                    <div className="flex flex-col items-center shrink-0">
+                      <span className="w-6 h-6 rounded-sm bg-ink text-surface font-mono text-[11px] font-medium flex items-center justify-center">
+                        {i + 1}
+                      </span>
+                      {i < ADOPTION_PHASES.length - 1 && <span className="w-px flex-1 bg-rule my-1" />}
+                    </div>
+                    <div className={i < ADOPTION_PHASES.length - 1 ? 'pb-5' : ''}>
+                      <div className="text-[13px] font-semibold text-ink">
+                        {phase.title}
+                        <span className="font-mono font-normal text-[11px] text-ink-4 ml-2">{phase.weeks}</span>
+                      </div>
+                      <ul className="text-[12px] text-ink-3 mt-1 space-y-0.5">
+                        {phase.items.map(item => (
+                          <li key={item} className="flex gap-1.5">
+                            <span className="text-ink-4">·</span>
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+
+              <div className="mt-4 p-3 bg-sunk border border-rule rounded-sm">
+                <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-ink-4 mb-1">
+                  Objectif à 3 mois
+                </div>
+                <div className="text-[12px] text-ink-2">
+                  Atteindre {(adoptionFactor * 100).toFixed(0)} % d'adoption et mesurer les gains réels
+                </div>
+              </div>
+
+              <p className="text-[11px] text-ink-4 leading-snug mt-3">
+                Cette séquence est générique : elle ne dépend pas encore du métier, de la taille d'équipe
+                ni du niveau d'adoption saisis.
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* VALIDATION TERRAIN */}
         <div className="lg:col-span-12">
-          <Card className="border-blue-200 bg-blue-50/30">
-            <CardHeader>
+          <div className="border border-rule-firm bg-surface rounded-sm">
+            <div className="px-5 py-3">
               <button 
                 onClick={() => setShowRealWorld(!showRealWorld)}
                 className="w-full flex items-center justify-between text-left"
               >
-                <CardTitle className="text-sm flex items-center gap-2">
+                <span className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4 flex items-center gap-2">
                   <BarChart3 className="w-4 h-4 text-blue-600" />
                   Validation terrain (12 utilisateurs, 6 mois en 2025)
-                </CardTitle>
+                </span>
                 {showRealWorld ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
-            </CardHeader>
+            </div>
             {showRealWorld && (
-              <CardContent className="text-xs space-y-4 text-slate-700">
-                <div className="bg-white p-4 rounded-lg border border-blue-200">
+              <div className="px-5 pb-5 text-[12px] space-y-4 text-ink-2 border-t border-rule pt-4">
+                <div className="bg-surface p-4 rounded-lg border border-blue-200">
                   <p className="font-medium mb-2">
                     Pour valider nos coefficients, nous avons mesuré les gains réels de 12 professionnels 
                     accompagnés ayant adopté Claude/Gemini pendant 6 mois.
@@ -1041,18 +1092,18 @@ export default function ROICalculator() {
                 <p className="font-semibold">Comparaison gains théoriques vs. gains observés (tâches à fort potentiel uniquement) :</p>
                 <div className="grid md:grid-cols-3 gap-4">
                   {currentTasks.filter(t => t.realWorld).map((task) => (
-                    <div key={task.id} className="bg-white p-3 rounded border border-slate-200">
-                      <div className="font-semibold text-slate-800 mb-2">{task.label}</div>
+                    <div key={task.id} className="bg-surface p-3 rounded border border-rule">
+                      <div className="font-semibold text-ink mb-2">{task.label}</div>
                       <div className="space-y-1">
                         <div className="flex justify-between">
-                          <span className="text-slate-600">Théorique :</span>
+                          <span className="text-ink-3">Théorique :</span>
                           <span className="font-mono font-bold text-blue-600">{(task.k * 100).toFixed(0)}%</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-600">Observé :</span>
+                          <span className="text-ink-3">Observé :</span>
                           <span className="font-mono font-bold text-emerald-600">{(task.realWorld! * 100).toFixed(0)}%</span>
                         </div>
-                        <div className="flex justify-between text-slate-500">
+                        <div className="flex justify-between text-ink-3">
                           <span>Écart :</span>
                           <span className="font-mono">{((task.realWorld! - task.k) * 100).toFixed(0)}%</span>
                         </div>
@@ -1061,7 +1112,7 @@ export default function ROICalculator() {
                   ))}
                 </div>
 
-                <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg">
+                <div className="bg-sunk border border-rule p-4 rounded-lg">
                   <div className="flex items-start gap-2">
                     <span className="text-xl">💡</span>
                     <div>
@@ -1074,40 +1125,40 @@ export default function ROICalculator() {
                   </div>
                 </div>
 
-                <div className="text-[10px] text-slate-500 italic border-t pt-3">
+                <div className="text-[10px] text-ink-3 italic border-t pt-3">
                   <strong>Note :</strong> Ces chiffres sont régulièrement mis à jour pour refléter notre retour d'expérience 
                   et l'évolution des modèles IA. Dernière mise à jour : Janvier 2025.
                 </div>
-              </CardContent>
+              </div>
             )}
-          </Card>
+          </div>
         </div>
 
         {/* MÉTHODOLOGIE */}
         <div className="lg:col-span-12">
-          <Card className="border-dashed border-slate-300 shadow-none bg-transparent">
+          <div className="border border-dashed border-rule-firm rounded-sm bg-transparent">
             <button 
               onClick={() => setShowMethodology(!showMethodology)}
-              className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition-colors rounded-lg"
+              className="w-full flex items-center justify-between p-4 hover:bg-sunk transition-colors rounded-lg"
             >
-              <div className="flex items-center gap-2 text-sm font-bold text-slate-600">
+              <div className="flex items-center gap-2 text-sm font-bold text-ink-3">
                 <BookOpen className="w-4 h-4" /> MÉTHODOLOGIE & SOURCES
               </div>
               {showMethodology ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
             
             {showMethodology && (
-              <CardContent className="border-t p-6 space-y-8 bg-white">
+              <div className="border-t border-rule p-6 space-y-8 bg-surface">
                 {/* Sources académiques complètes */}
                 <div className="space-y-4">
-                  <h4 className="font-bold text-slate-800 uppercase text-xs tracking-widest">Sources académiques</h4>
+                  <h4 className="font-bold text-ink uppercase text-xs tracking-widest">Sources académiques</h4>
                   <div className="space-y-3 text-sm">
-                    <div className="bg-slate-50 p-4 rounded border border-slate-200">
-                      <div className="font-semibold text-slate-900">Navigating the Jagged Technological Frontier</div>
-                      <div className="text-xs text-slate-600 mt-1">
+                    <div className="bg-sunk p-4 rounded border border-rule">
+                      <div className="font-semibold text-ink">Navigating the Jagged Technological Frontier</div>
+                      <div className="text-xs text-ink-3 mt-1">
                         Dell'Acqua, F., McFowland, E., Mollick, E. R., et al. (2023)
                       </div>
-                      <div className="text-xs text-slate-500">Harvard Business School / Wharton</div>
+                      <div className="text-xs text-ink-3">Harvard Business School / Wharton</div>
                       <a 
                         href="https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4573321" 
                         target="_blank" 
@@ -1119,12 +1170,12 @@ export default function ROICalculator() {
                       </a>
                     </div>
                     
-                    <div className="bg-slate-50 p-4 rounded border border-slate-200">
-                      <div className="font-semibold text-slate-900">Experimental Evidence on the Productivity Effects of Generative AI</div>
-                      <div className="text-xs text-slate-600 mt-1">
+                    <div className="bg-sunk p-4 rounded border border-rule">
+                      <div className="font-semibold text-ink">Experimental Evidence on the Productivity Effects of Generative AI</div>
+                      <div className="text-xs text-ink-3 mt-1">
                         Noy, S., & Zhang, W. (2023)
                       </div>
-                      <div className="text-xs text-slate-500">MIT Economics</div>
+                      <div className="text-xs text-ink-3">MIT Economics</div>
                       <a 
                         href="https://economics.mit.edu/sites/default/files/inline-files/Noy_Zhang_1.pdf" 
                         target="_blank" 
@@ -1136,12 +1187,12 @@ export default function ROICalculator() {
                       </a>
                     </div>
                     
-                    <div className="bg-slate-50 p-4 rounded border border-slate-200">
-                      <div className="font-semibold text-slate-900">Generative AI at Work</div>
-                      <div className="text-xs text-slate-600 mt-1">
+                    <div className="bg-sunk p-4 rounded border border-rule">
+                      <div className="font-semibold text-ink">Generative AI at Work</div>
+                      <div className="text-xs text-ink-3 mt-1">
                         Brynjolfsson, E., Li, D., & Raymond, L. (2023)
                       </div>
-                      <div className="text-xs text-slate-500">NBER Working Paper No. 31161</div>
+                      <div className="text-xs text-ink-3">NBER Working Paper No. 31161</div>
                       <a 
                         href="https://www.nber.org/papers/w31161" 
                         target="_blank" 
@@ -1153,12 +1204,12 @@ export default function ROICalculator() {
                       </a>
                     </div>
                     
-                    <div className="bg-slate-50 p-4 rounded border border-slate-200">
-                      <div className="font-semibold text-slate-900">The Impact of AI on Developer Productivity</div>
-                      <div className="text-xs text-slate-600 mt-1">
+                    <div className="bg-sunk p-4 rounded border border-rule">
+                      <div className="font-semibold text-ink">The Impact of AI on Developer Productivity</div>
+                      <div className="text-xs text-ink-3 mt-1">
                         Peng, S., et al. (2023)
                       </div>
-                      <div className="text-xs text-slate-500">GitHub / Microsoft Research</div>
+                      <div className="text-xs text-ink-3">GitHub / Microsoft Research</div>
                       <a 
                         href="https://arxiv.org/abs/2302.06590" 
                         target="_blank" 
@@ -1175,8 +1226,8 @@ export default function ROICalculator() {
                 {/* 4 colonnes méthodologie */}
                 <div className="grid md:grid-cols-4 gap-8 text-sm pt-6 border-t">
                   <div className="space-y-2">
-                    <h4 className="font-bold text-slate-800 uppercase text-[10px] tracking-widest">Méthode</h4>
-                    <p className="text-slate-600 text-xs">
+                    <h4 className="font-bold text-ink uppercase text-[10px] tracking-widest">Méthode</h4>
+                    <p className="text-ink-3 text-xs">
                       Coefficient d'efficience (k) par tâche issu des études ou estimé, 
                       multiplié par le facteur d'adoption (0.5-1.0) ajustable. Toutes les tâches ont un k, 
                       même les moins automatisables.
@@ -1184,8 +1235,8 @@ export default function ROICalculator() {
                   </div>
                   
                   <div className="space-y-2">
-                    <h4 className="font-bold text-slate-800 uppercase text-[10px] tracking-widest">Calculs</h4>
-                    <p className="text-slate-600 text-xs">
+                    <h4 className="font-bold text-ink uppercase text-[10px] tracking-widest">Calculs</h4>
+                    <p className="text-ink-3 text-xs">
                       Gain = Σ(H × k × adoption) × Taux × 3.92 × N
                       <br />où H = heures/semaine, N = collaborateurs, k = coefficient
                       d'efficience, et 3.92 = 47 semaines travaillées / 12 mois
@@ -1193,9 +1244,9 @@ export default function ROICalculator() {
                   </div>
                   
                   <div className="space-y-2">
-                    <h4 className="font-bold text-slate-800 uppercase text-[10px] tracking-widest">Hypothèses</h4>
-                    <p className="text-slate-600 text-xs">
-                      Licence : 30€/mois/user, payée 12 mois. Semaine : 37.5h.
+                    <h4 className="font-bold text-ink uppercase text-[10px] tracking-widest">Hypothèses</h4>
+                    <p className="text-ink-3 text-xs">
+                      Licence : 30€/mois/user, payée 12 mois. Semaine : {HOURS_PER_WEEK.toLocaleString('fr-FR')} h.
                       <strong> Année travaillée : 47 semaines</strong> (52 moins 5 semaines
                       de congés payés), soit un facteur mensuel de 3.92 = 47/12. Un
                       collaborateur en congé ne produit aucun gain : retenir 52 surestimerait
@@ -1216,7 +1267,7 @@ export default function ROICalculator() {
                     <h4 className="font-bold text-red-600 uppercase text-[10px] tracking-widest flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3" /> Non comptabilisé
                     </h4>
-                    <ul className="space-y-1 text-slate-600 text-xs">
+                    <ul className="space-y-1 text-ink-3 text-xs">
                       <li>• Formation initiale (2-4 sem.)</li>
                       <li>• Courbe d'apprentissage</li>
                       <li>• Debugging des outputs</li>
@@ -1237,12 +1288,12 @@ export default function ROICalculator() {
                       <Download className="w-4 h-4" />
                       Télécharger mes hypothèses (JSON)
                     </button>
-                    <div className="text-xs text-slate-400">
+                    <div className="text-xs text-ink-4">
                       Version 1.4 • Août 2026
                     </div>
                   </div>
                   
-                  <div className="border-t pt-4 text-xs text-slate-500 space-y-2">
+                  <div className="border-t pt-4 text-xs text-ink-3 space-y-2">
                     <p>
                       <strong>Méthodologie ouverte :</strong> Ce calculateur applique les résultats 
                       d'études académiques peer-reviewed et des estimations raisonnées pour toutes les tâches professionnelles. 
@@ -1268,14 +1319,14 @@ export default function ROICalculator() {
                         Documentation complète
                       </a>
                     </div>
-                    <p className="text-slate-400 text-[10px] pt-2">
+                    <p className="text-ink-4 text-[10px] pt-2">
                       Licence MIT • Auteur : Maurice Mendy • <a href="https://mauricemendy.com" target="_blank" rel="noopener noreferrer" className="hover:underline">mauricemendy.com</a>
                     </p>
                   </div>
                 </div>
-              </CardContent>
+              </div>
             )}
-          </Card>
+          </div>
         </div>
       </div>
     </div>
