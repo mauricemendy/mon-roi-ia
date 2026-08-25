@@ -153,6 +153,12 @@ const WORKED_WEEKS_PER_YEAR = 47;
 const WORKED_WEEKS_PER_MONTH = WORKED_WEEKS_PER_YEAR / 12;
 // Journée de référence, pour convertir des heures en jours libérés.
 const HOURS_PER_DAY = 7.5;
+// Semaine de référence déclarée par l'utilisateur.
+const HOURS_PER_WEEK = 37.5;
+// Assiette du taux horaire : les heures réellement travaillées dans l'année.
+// C'est le dénominateur qui rend le taux cohérent avec l'année travaillée —
+// rapporter le coût chargé à 52 semaines sous-estimerait le coût d'une heure.
+const WORKED_HOURS_PER_YEAR = WORKED_WEEKS_PER_YEAR * HOURS_PER_WEEK; // 1762.5
 
 // Ramène une saisie de champ numérique dans [min, max]. Un champ vidé ou une
 // saisie non numérique retombe sur la valeur de repli plutôt que sur NaN.
@@ -175,7 +181,12 @@ const getKColor = (k: number) => {
 export default function ROICalculator() {
   const [prof, setProf] = useState('engineering');
   const [collabs, setCollabs] = useState(5);
+  // Le coût se saisit au choix à l'heure ou à l'année. Une seule des deux
+  // valeurs pilote le calcul à la fois — celle du mode actif — et la bascule
+  // reporte la valeur courante dans l'autre, pour qu'elles ne divergent jamais.
+  const [rateMode, setRateMode] = useState<'horaire' | 'annuel'>('horaire');
   const [rate, setRate] = useState(45);
+  const [annualCost, setAnnualCost] = useState(Math.round(45 * WORKED_HOURS_PER_YEAR));
   const [hours, setHours] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
     PROFESSIONS.engineering.tasks.forEach(task => {
@@ -193,8 +204,28 @@ export default function ROICalculator() {
     low: false
   });
 
-  const formatEuro = (val: number) => 
+  const formatEuro = (val: number) =>
     new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val);
+
+  // Taux horaire effectivement appliqué : saisi directement, ou dérivé du coût
+  // chargé annuel divisé par les heures travaillées.
+  const effectiveRate = useMemo(() => {
+    if (rateMode === 'annuel') {
+      return Number.isFinite(annualCost) ? annualCost / WORKED_HOURS_PER_YEAR : 0;
+    }
+    return rate;
+  }, [rateMode, rate, annualCost]);
+
+  // Contrepartie affichée sous le champ, pour que les deux bases restent visibles.
+  const derivedAnnualCost = effectiveRate * WORKED_HOURS_PER_YEAR;
+
+  const switchRateMode = (mode: 'horaire' | 'annuel') => {
+    if (mode === rateMode) return;
+    // On reporte la valeur courante dans la base cible avant de basculer.
+    if (mode === 'annuel') setAnnualCost(Math.round(effectiveRate * WORKED_HOURS_PER_YEAR));
+    else setRate(Math.round(effectiveRate * 100) / 100);
+    setRateMode(mode);
+  };
 
   const results = useMemo(() => {
     const currentTasks = PROFESSIONS[prof as keyof typeof PROFESSIONS].tasks;
@@ -204,7 +235,7 @@ export default function ROICalculator() {
     // numérique). On les ramène dans le domaine avant tout calcul, sinon le NaN
     // se propage jusqu'à l'affichage.
     const safeCollabs = Number.isFinite(collabs) ? Math.max(1, Math.round(collabs)) : 1;
-    const safeRate = Number.isFinite(rate) ? Math.max(0, rate) : 0;
+    const safeRate = Number.isFinite(effectiveRate) ? Math.max(0, effectiveRate) : 0;
 
     const hoursPerWeek = currentTasks.reduce((acc, t, i) => {
       const h = hours[t.id] || t.defaultHours;
@@ -222,7 +253,7 @@ export default function ROICalculator() {
     return {
       hoursPerWeek: hoursPerWeek.toFixed(1),
       extraTimeYear: (hoursPerWeek * WORKED_WEEKS_PER_YEAR / HOURS_PER_DAY).toFixed(0),
-      percentTime: ((hoursPerWeek / 37.5) * 100).toFixed(0),
+      percentTime: ((hoursPerWeek / HOURS_PER_WEEK) * 100).toFixed(0),
       percentTotal: totalHours > 0 ? ((hoursPerWeek / totalHours) * 100).toFixed(0) : '0',
       gain: Math.round(grossGain),
       net: Math.round(grossGain - totalCost),
@@ -233,7 +264,7 @@ export default function ROICalculator() {
         ? `Jour ${Math.min(30, Math.max(1, Math.round(totalCost / (grossGain / 30))))}`
         : '—'
     };
-  }, [prof, collabs, rate, hours, adoptionFactor, customCoefficients]);
+  }, [prof, collabs, effectiveRate, hours, adoptionFactor, customCoefficients]);
 
   const handleProfessionChange = (newProf: string) => {
     setProf(newProf);
@@ -256,7 +287,9 @@ export default function ROICalculator() {
         profession: prof,
         professionLabel: PROFESSIONS[prof as keyof typeof PROFESSIONS].label,
         collaborateurs: collabs,
-        tauxHoraire: rate,
+        baseDeSaisie: rateMode === 'annuel' ? "coût chargé annuel" : "taux horaire",
+        tauxHoraire: Number(effectiveRate.toFixed(2)),
+        coutChargeAnnuel: Math.round(derivedAnnualCost),
         heuresParTache: hours,
         facteurAdoption: adoptionFactor
       },
@@ -264,9 +297,10 @@ export default function ROICalculator() {
         semainesTravailleesParAn: WORKED_WEEKS_PER_YEAR,
         facteurMensuel: Number(WORKED_WEEKS_PER_MONTH.toFixed(4)),
         heuresParJour: HOURS_PER_DAY,
-        heuresParSemaine: 37.5,
+        heuresParSemaine: HOURS_PER_WEEK,
+        heuresTravailleesParAn: WORKED_HOURS_PER_YEAR,
         coutLicenceMensuel: 30,
-        baseTauxHoraire: "Coût chargé annuel / 1762.5 h travaillées (47 x 37.5)",
+        baseTauxHoraire: `Coût chargé annuel / ${WORKED_HOURS_PER_YEAR} h travaillées (${WORKED_WEEKS_PER_YEAR} x ${HOURS_PER_WEEK}). Valorisation au coût, non au taux de facturation.`,
         note: "47 semaines = 52 - 5 semaines de congés payés. Les jours fériés et les RTT ne sont pas déduits ; la licence est comptée sur 12 mois.",
         natureDuResultat: "Valeur du temps libéré, et non une économie de trésorerie : à effectif constant les heures sont réallouées, pas encaissées."
       },
@@ -458,17 +492,78 @@ export default function ROICalculator() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs uppercase font-bold text-slate-500">Taux horaire (€)</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={1000}
-                      step={1}
-                      value={rate}
-                      onChange={(e) => setRate(clampNumber(e.target.value, 0, 1000, 0))}
-                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs uppercase font-bold text-slate-500">
+                        {rateMode === 'horaire' ? 'Taux horaire (€)' : 'Coût annuel (€)'}
+                      </Label>
+                      <div className="flex rounded border border-slate-200 overflow-hidden shrink-0">
+                        <button
+                          type="button"
+                          aria-pressed={rateMode === 'horaire'}
+                          onClick={() => switchRateMode('horaire')}
+                          className={`px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                            rateMode === 'horaire'
+                              ? 'bg-slate-800 text-white'
+                              : 'bg-white text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          /h
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={rateMode === 'annuel'}
+                          onClick={() => switchRateMode('annuel')}
+                          className={`px-2 py-0.5 text-[10px] font-semibold transition-colors border-l border-slate-200 ${
+                            rateMode === 'annuel'
+                              ? 'bg-slate-800 text-white'
+                              : 'bg-white text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          /an
+                        </button>
+                      </div>
+                    </div>
+
+                    {rateMode === 'horaire' ? (
+                      <Input
+                        type="number"
+                        min={0}
+                        max={1000}
+                        step={1}
+                        value={rate}
+                        onChange={(e) => setRate(clampNumber(e.target.value, 0, 1000, 0))}
+                      />
+                    ) : (
+                      <Input
+                        type="number"
+                        min={0}
+                        max={1000 * WORKED_HOURS_PER_YEAR}
+                        step={1000}
+                        value={annualCost}
+                        onChange={(e) =>
+                          setAnnualCost(clampNumber(e.target.value, 0, 1000 * WORKED_HOURS_PER_YEAR, 0))
+                        }
+                      />
+                    )}
+
                     <p className="text-[10px] text-slate-500 leading-snug">
-                      Coût chargé annuel ÷ {(WORKED_WEEKS_PER_YEAR * 37.5).toLocaleString('fr-FR')} h travaillées
+                      {rateMode === 'horaire' ? (
+                        <>
+                          soit <strong>{Math.round(derivedAnnualCost).toLocaleString('fr-FR')} €</strong> de
+                          coût chargé annuel
+                        </>
+                      ) : (
+                        <>
+                          soit{' '}
+                          <strong>
+                            {effectiveRate.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} €/h
+                          </strong>{' '}
+                          travaillée
+                        </>
+                      )}
+                      <br />
+                      Base : coût <em>chargé</em> ÷ {WORKED_HOURS_PER_YEAR.toLocaleString('fr-FR')} h
+                      travaillées ({WORKED_WEEKS_PER_YEAR} × {HOURS_PER_WEEK})
                     </p>
                   </div>
                 </div>
