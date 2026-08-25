@@ -141,17 +141,52 @@ const PROFESSIONS = {
   }
 };
 
+// --- Hypothèses temporelles ---------------------------------------------
+// On raisonne en année *travaillée*, pas en année pleine : 52 semaines moins
+// les 5 semaines de congés payés. Un collaborateur en congé ne produit aucun
+// gain, alors que la licence, elle, se paie douze mois sur douze — retenir 52
+// surestimerait le gain d'environ 9,5 %.
+// Ces 47 semaines ne déduisent que les congés payés : ni les jours fériés
+// (~11 jours), ni les RTT. L'estimation reste donc un majorant à ce titre.
+const WORKED_WEEKS_PER_YEAR = 47;
+// Semaines travaillées ramenées au mois, pour les montants mensuels (≈ 3.92).
+const WORKED_WEEKS_PER_MONTH = WORKED_WEEKS_PER_YEAR / 12;
+// Journée de référence, pour convertir des heures en jours libérés.
+const HOURS_PER_DAY = 7.5;
+// Semaine de référence déclarée par l'utilisateur.
+const HOURS_PER_WEEK = 37.5;
+// Assiette du taux horaire : les heures réellement travaillées dans l'année.
+// C'est le dénominateur qui rend le taux cohérent avec l'année travaillée —
+// rapporter le coût chargé à 52 semaines sous-estimerait le coût d'une heure.
+const WORKED_HOURS_PER_YEAR = WORKED_WEEKS_PER_YEAR * HOURS_PER_WEEK; // 1762.5
+
+// Ramène une saisie de champ numérique dans [min, max]. Un champ vidé ou une
+// saisie non numérique retombe sur la valeur de repli plutôt que sur NaN.
+const clampNumber = (raw: string, min: number, max: number, fallback: number) => {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+};
+
+// Échelle de potentiel. Les classes sont écrites en toutes lettres : Tailwind
+// ne génère que ce qu'il trouve statiquement dans les sources.
+// L'ordre des couleurs suit la légende affichée dans la colonne de configuration.
 const getKColor = (k: number) => {
-  if (k === 0) return { bg: 'bg-slate-100', text: 'text-slate-500', border: 'border-slate-200', label: 'Non automatisable' };
-  if (k < 0.3) return { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', label: 'Potentiel faible' };
-  if (k < 0.5) return { bg: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-200', label: 'Potentiel moyen' };
-  return { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', label: 'Fort potentiel' };
+  if (k === 0) return { bar: 'bg-slate-400', badge: 'bg-slate-100 text-slate-600', label: 'Non automatisable' };
+  if (k < 0.3) return { bar: 'bg-amber-600', badge: 'bg-amber-50 text-amber-700', label: 'Potentiel faible' };
+  if (k < 0.5) return { bar: 'bg-blue-600', badge: 'bg-blue-50 text-blue-700', label: 'Potentiel moyen' };
+  return { bar: 'bg-emerald-600', badge: 'bg-emerald-50 text-emerald-700', label: 'Fort potentiel' };
 };
 
 export default function ROICalculator() {
   const [prof, setProf] = useState('engineering');
   const [collabs, setCollabs] = useState(5);
+  // Le coût se saisit au choix à l'heure ou à l'année. Une seule des deux
+  // valeurs pilote le calcul à la fois — celle du mode actif — et la bascule
+  // reporte la valeur courante dans l'autre, pour qu'elles ne divergent jamais.
+  const [rateMode, setRateMode] = useState<'horaire' | 'annuel'>('horaire');
   const [rate, setRate] = useState(45);
+  const [annualCost, setAnnualCost] = useState(Math.round(45 * WORKED_HOURS_PER_YEAR));
   const [hours, setHours] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
     PROFESSIONS.engineering.tasks.forEach(task => {
@@ -169,13 +204,39 @@ export default function ROICalculator() {
     low: false
   });
 
-  const formatEuro = (val: number) => 
+  const formatEuro = (val: number) =>
     new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val);
+
+  // Taux horaire effectivement appliqué : saisi directement, ou dérivé du coût
+  // chargé annuel divisé par les heures travaillées.
+  const effectiveRate = useMemo(() => {
+    if (rateMode === 'annuel') {
+      return Number.isFinite(annualCost) ? annualCost / WORKED_HOURS_PER_YEAR : 0;
+    }
+    return rate;
+  }, [rateMode, rate, annualCost]);
+
+  // Contrepartie affichée sous le champ, pour que les deux bases restent visibles.
+  const derivedAnnualCost = effectiveRate * WORKED_HOURS_PER_YEAR;
+
+  const switchRateMode = (mode: 'horaire' | 'annuel') => {
+    if (mode === rateMode) return;
+    // On reporte la valeur courante dans la base cible avant de basculer.
+    if (mode === 'annuel') setAnnualCost(Math.round(effectiveRate * WORKED_HOURS_PER_YEAR));
+    else setRate(Math.round(effectiveRate * 100) / 100);
+    setRateMode(mode);
+  };
 
   const results = useMemo(() => {
     const currentTasks = PROFESSIONS[prof as keyof typeof PROFESSIONS].tasks;
     const licenceCost = 30;
-    
+
+    // Les champs numériques peuvent transiter par NaN (champ vidé, saisie non
+    // numérique). On les ramène dans le domaine avant tout calcul, sinon le NaN
+    // se propage jusqu'à l'affichage.
+    const safeCollabs = Number.isFinite(collabs) ? Math.max(1, Math.round(collabs)) : 1;
+    const safeRate = Number.isFinite(effectiveRate) ? Math.max(0, effectiveRate) : 0;
+
     const hoursPerWeek = currentTasks.reduce((acc, t, i) => {
       const h = hours[t.id] || t.defaultHours;
       const k = customCoefficients?.[i] ?? t.k;
@@ -183,21 +244,27 @@ export default function ROICalculator() {
     }, 0);
 
     const totalHours = currentTasks.reduce((acc, t) => acc + (hours[t.id] || t.defaultHours), 0);
-    
-    const grossGain = hoursPerWeek * rate * 4.33 * collabs;
-    const totalCost = collabs * licenceCost;
-    
+
+    // Année travaillée, cf. WORKED_WEEKS_PER_YEAR. Le coût de licence, lui,
+    // court sur les 12 mois : le rapport gain/coût intègre donc les congés.
+    const grossGain = hoursPerWeek * safeRate * WORKED_WEEKS_PER_MONTH * safeCollabs;
+    const totalCost = safeCollabs * licenceCost;
+
     return {
       hoursPerWeek: hoursPerWeek.toFixed(1),
-      extraTimeYear: (hoursPerWeek * 52 / 7.5).toFixed(0),
-      percentTime: ((hoursPerWeek / 37.5) * 100).toFixed(0),
-      percentTotal: ((hoursPerWeek / totalHours) * 100).toFixed(0),
+      extraTimeYear: (hoursPerWeek * WORKED_WEEKS_PER_YEAR / HOURS_PER_DAY).toFixed(0),
+      percentTime: ((hoursPerWeek / HOURS_PER_WEEK) * 100).toFixed(0),
+      percentTotal: totalHours > 0 ? ((hoursPerWeek / totalHours) * 100).toFixed(0) : '0',
       gain: Math.round(grossGain),
       net: Math.round(grossGain - totalCost),
-      roi: (grossGain / totalCost).toFixed(1),
-      breakeven: Math.min(30, Math.round((totalCost / (grossGain / 30)) || 0))
+      roi: grossGain > 0 ? (grossGain / totalCost).toFixed(1) : '—',
+      // Plancher à 1 : un seuil franchi en moins d'une journée s'arrondissait à
+      // « Jour 0 », qui ne veut rien dire.
+      breakeven: grossGain > 0
+        ? `Jour ${Math.min(30, Math.max(1, Math.round(totalCost / (grossGain / 30))))}`
+        : '—'
     };
-  }, [prof, collabs, rate, hours, adoptionFactor, customCoefficients]);
+  }, [prof, collabs, effectiveRate, hours, adoptionFactor, customCoefficients]);
 
   const handleProfessionChange = (newProf: string) => {
     setProf(newProf);
@@ -212,7 +279,7 @@ export default function ROICalculator() {
   const exportHypotheses = () => {
     const data = {
       metadata: {
-        version: "1.3",
+        version: "1.4",
         date: new Date().toISOString(),
         tool: "Calculateur ROI GenAI - mauricemendy.com"
       },
@@ -220,9 +287,22 @@ export default function ROICalculator() {
         profession: prof,
         professionLabel: PROFESSIONS[prof as keyof typeof PROFESSIONS].label,
         collaborateurs: collabs,
-        tauxHoraire: rate,
+        baseDeSaisie: rateMode === 'annuel' ? "coût chargé annuel" : "taux horaire",
+        tauxHoraire: Number(effectiveRate.toFixed(2)),
+        coutChargeAnnuel: Math.round(derivedAnnualCost),
         heuresParTache: hours,
         facteurAdoption: adoptionFactor
+      },
+      hypotheses: {
+        semainesTravailleesParAn: WORKED_WEEKS_PER_YEAR,
+        facteurMensuel: Number(WORKED_WEEKS_PER_MONTH.toFixed(4)),
+        heuresParJour: HOURS_PER_DAY,
+        heuresParSemaine: HOURS_PER_WEEK,
+        heuresTravailleesParAn: WORKED_HOURS_PER_YEAR,
+        coutLicenceMensuel: 30,
+        baseTauxHoraire: `Coût chargé annuel / ${WORKED_HOURS_PER_YEAR} h travaillées (${WORKED_WEEKS_PER_YEAR} x ${HOURS_PER_WEEK}). Valorisation au coût, non au taux de facturation.`,
+        note: "47 semaines = 52 - 5 semaines de congés payés. Les jours fériés et les RTT ne sont pas déduits ; la licence est comptée sur 12 mois.",
+        natureDuResultat: "Valeur du temps libéré, et non une économie de trésorerie : à effectif constant les heures sont réallouées, pas encaissées."
       },
       coefficients: PROFESSIONS[prof as keyof typeof PROFESSIONS].tasks.map((t, i) => ({
         tache: t.label,
@@ -315,29 +395,31 @@ export default function ROICalculator() {
     const top1 = top3[0]?.task;
     const top2 = top3[1]?.task;
 
-    // Tips selon le profil du Top 3
+    // Tips selon le profil du Top 3.
+    // Les classes sont des littéraux : une classe assemblée à l'exécution
+    // (`text-${color}-600`) ne survit pas au build Tailwind.
     if (highPotentialCount >= 2) {
       // 2-3 tâches fort potentiel dans le Top 3
       const highTasks = top3.filter(item => item.task.k >= 0.5).map(item => item.task.label);
       return [
-        { color: 'emerald', text: `Priorisez ${highTasks[0]} et ${highTasks[1]} (k≥0.5)` },
-        { color: 'blue', text: 'ROI immédiat : ces tâches sont vos quick wins' },
-        { color: 'amber', text: 'Formez vos équipes sur le prompting efficace' }
+        { arrowClass: 'text-emerald-600', text: `Priorisez ${highTasks[0]} et ${highTasks[1]} (k≥0.5)` },
+        { arrowClass: 'text-blue-600', text: 'ROI immédiat : ces tâches sont vos quick wins' },
+        { arrowClass: 'text-amber-600', text: 'Formez vos équipes sur le prompting efficace' }
       ];
     } else if (highPotentialCount === 1) {
       // 1 seule tâche fort potentiel
       const highTask = top3.find(item => item.task.k >= 0.5)?.task;
       return [
-        { color: 'emerald', text: `Commencez par ${highTask?.label} (k=${highTask?.k.toFixed(2)})` },
-        { color: 'blue', text: `Puis étendez à ${top2?.label} progressivement` },
-        { color: 'amber', text: 'Mesurez l\'adoption après 1 mois' }
+        { arrowClass: 'text-emerald-600', text: `Commencez par ${highTask?.label} (k=${highTask?.k.toFixed(2)})` },
+        { arrowClass: 'text-blue-600', text: `Puis étendez à ${top2?.label} progressivement` },
+        { arrowClass: 'text-amber-600', text: 'Mesurez l\'adoption après 1 mois' }
       ];
     } else {
       // Aucune tâche fort potentiel (ex: Sales)
       return [
-        { color: 'emerald', text: `Focus sur ${top1?.label} et ${top2?.label}` },
-        { color: 'blue', text: 'Commencez par 1-2 tâches, puis étendez' },
-        { color: 'amber', text: 'Partagez les best practices en équipe' }
+        { arrowClass: 'text-emerald-600', text: `Focus sur ${top1?.label} et ${top2?.label}` },
+        { arrowClass: 'text-blue-600', text: 'Commencez par 1-2 tâches, puis étendez' },
+        { arrowClass: 'text-amber-600', text: 'Partagez les best practices en équipe' }
       ];
     }
   };
@@ -400,11 +482,89 @@ export default function ROICalculator() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-xs uppercase font-bold text-slate-500">Utilisateurs</Label>
-                    <Input type="number" value={collabs} onChange={(e) => setCollabs(Number(e.target.value))} />
+                    <Input
+                      type="number"
+                      min={1}
+                      max={10000}
+                      step={1}
+                      value={collabs}
+                      onChange={(e) => setCollabs(clampNumber(e.target.value, 1, 10000, 1))}
+                    />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs uppercase font-bold text-slate-500">Taux horaire (€)</Label>
-                    <Input type="number" value={rate} onChange={(e) => setRate(Number(e.target.value))} />
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs uppercase font-bold text-slate-500">
+                        {rateMode === 'horaire' ? 'Taux horaire (€)' : 'Coût annuel (€)'}
+                      </Label>
+                      <div className="flex rounded border border-slate-200 overflow-hidden shrink-0">
+                        <button
+                          type="button"
+                          aria-pressed={rateMode === 'horaire'}
+                          onClick={() => switchRateMode('horaire')}
+                          className={`px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                            rateMode === 'horaire'
+                              ? 'bg-slate-800 text-white'
+                              : 'bg-white text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          /h
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={rateMode === 'annuel'}
+                          onClick={() => switchRateMode('annuel')}
+                          className={`px-2 py-0.5 text-[10px] font-semibold transition-colors border-l border-slate-200 ${
+                            rateMode === 'annuel'
+                              ? 'bg-slate-800 text-white'
+                              : 'bg-white text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          /an
+                        </button>
+                      </div>
+                    </div>
+
+                    {rateMode === 'horaire' ? (
+                      <Input
+                        type="number"
+                        min={0}
+                        max={1000}
+                        step={1}
+                        value={rate}
+                        onChange={(e) => setRate(clampNumber(e.target.value, 0, 1000, 0))}
+                      />
+                    ) : (
+                      <Input
+                        type="number"
+                        min={0}
+                        max={1000 * WORKED_HOURS_PER_YEAR}
+                        step={1000}
+                        value={annualCost}
+                        onChange={(e) =>
+                          setAnnualCost(clampNumber(e.target.value, 0, 1000 * WORKED_HOURS_PER_YEAR, 0))
+                        }
+                      />
+                    )}
+
+                    <p className="text-[10px] text-slate-500 leading-snug">
+                      {rateMode === 'horaire' ? (
+                        <>
+                          soit <strong>{Math.round(derivedAnnualCost).toLocaleString('fr-FR')} €</strong> de
+                          coût chargé annuel
+                        </>
+                      ) : (
+                        <>
+                          soit{' '}
+                          <strong>
+                            {effectiveRate.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} €/h
+                          </strong>{' '}
+                          travaillée
+                        </>
+                      )}
+                      <br />
+                      Base : coût <em>chargé</em> ÷ {WORKED_HOURS_PER_YEAR.toLocaleString('fr-FR')} h
+                      travaillées ({WORKED_WEEKS_PER_YEAR} × {HOURS_PER_WEEK})
+                    </p>
                   </div>
                 </div>
               </div>
@@ -471,7 +631,7 @@ export default function ROICalculator() {
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-sm font-medium text-slate-800">{task.label}</span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${color.badge}`}>
+                                    <span title={color.label} className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${color.badge}`}>
                                       k={task.k.toFixed(2)}
                                     </span>
                                   </div>
@@ -524,7 +684,7 @@ export default function ROICalculator() {
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-sm font-medium text-slate-800">{task.label}</span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${color.badge}`}>
+                                    <span title={color.label} className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${color.badge}`}>
                                       k={task.k.toFixed(2)}
                                     </span>
                                   </div>
@@ -577,7 +737,7 @@ export default function ROICalculator() {
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-sm font-medium text-slate-800">{task.label}</span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${color.badge}`}>
+                                    <span title={color.label} className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${color.badge}`}>
                                       k={task.k.toFixed(2)}
                                     </span>
                                   </div>
@@ -610,7 +770,7 @@ export default function ROICalculator() {
           <Card className="flex-1 border-slate-200 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-xs uppercase tracking-widest text-blue-600 font-bold">
-                Gain Utilisateur
+                Temps libéré / personne
               </CardTitle>
               <div className="text-xs text-slate-500 italic mt-1">
                 Facteur d'adoption : {(adoptionFactor * 100).toFixed(0)}%
@@ -657,7 +817,7 @@ export default function ROICalculator() {
           <Card className="flex-1 border-slate-200 shadow-sm bg-slate-900 text-white">
             <CardHeader className="pb-2">
               <CardTitle className="text-xs uppercase tracking-widest text-emerald-400 font-bold">
-                Estimation Impact Financier
+                Valeur du temps libéré
               </CardTitle>
               <div className="text-xs text-slate-400 italic mt-1">
                 Hypothèses moyennes secteur {PROFESSIONS[prof as keyof typeof PROFESSIONS].label}
@@ -666,15 +826,24 @@ export default function ROICalculator() {
             <CardContent className="space-y-6">
               <div>
                 <div className="text-5xl font-black text-white">{formatEuro(results.net)}</div>
-                <div className="text-sm text-slate-400 mt-1 uppercase tracking-wide">Gain net mensuel estimé pour l'équipe</div>
+                <div className="text-sm text-slate-400 mt-1 uppercase tracking-wide">
+                  Valeur mensuelle du temps libéré — équipe
+                </div>
+                <div className="text-xs text-slate-400 mt-3 leading-relaxed">
+                  <strong className="text-slate-200">Ce n'est pas une économie.</strong> À effectif constant,
+                  aucun euro n'entre en caisse : ce sont des heures réallouées, valorisées au taux horaire
+                  que vous avez saisi. Net du coût des licences.
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-8 pt-6 border-t border-white/10">
                 <div>
-                  <div className="text-3xl font-bold text-emerald-400">x{results.roi}</div>
+                  <div className="text-3xl font-bold text-emerald-400">
+                    {results.roi === '—' ? '—' : `x${results.roi}`}
+                  </div>
                   <div className="text-[10px] uppercase font-bold text-slate-500 tracking-widest">ROI Théorique</div>
                 </div>
                 <div>
-                  <div className="text-3xl font-bold text-white">Jour {results.breakeven}</div>
+                  <div className="text-3xl font-bold text-white">{results.breakeven}</div>
                   <div className="text-[10px] uppercase font-bold text-slate-500 tracking-widest">Break-even (Seuil)</div>
                 </div>
               </div>
@@ -737,7 +906,7 @@ export default function ROICalculator() {
                 <div className="space-y-1.5 text-xs text-slate-700">
                   {getDynamicTips().map((tip, idx) => (
                     <div key={idx} className="flex items-start gap-2">
-                      <span className={`text-${tip.color}-600 shrink-0`}>→</span>
+                      <span className={`${tip.arrowClass} shrink-0`}>→</span>
                       <span>{tip.text}</span>
                     </div>
                   ))}
@@ -1017,16 +1186,28 @@ export default function ROICalculator() {
                   <div className="space-y-2">
                     <h4 className="font-bold text-slate-800 uppercase text-[10px] tracking-widest">Calculs</h4>
                     <p className="text-slate-600 text-xs">
-                      Gain = Σ(H × k × adoption) × Taux × 4.33 × N
-                      <br />où H = heures/semaine, N = collaborateurs, k = coefficient d'efficience
+                      Gain = Σ(H × k × adoption) × Taux × 3.92 × N
+                      <br />où H = heures/semaine, N = collaborateurs, k = coefficient
+                      d'efficience, et 3.92 = 47 semaines travaillées / 12 mois
                     </p>
                   </div>
                   
                   <div className="space-y-2">
                     <h4 className="font-bold text-slate-800 uppercase text-[10px] tracking-widest">Hypothèses</h4>
                     <p className="text-slate-600 text-xs">
-                      Licence : 30€/mois/user. Semaine : 37.5h. 
-                      Année : 47 semaines travaillées. Taux incluant charges.
+                      Licence : 30€/mois/user, payée 12 mois. Semaine : 37.5h.
+                      <strong> Année travaillée : 47 semaines</strong> (52 moins 5 semaines
+                      de congés payés), soit un facteur mensuel de 3.92 = 47/12. Un
+                      collaborateur en congé ne produit aucun gain : retenir 52 surestimerait
+                      le résultat d'environ 9,5%. Ces 47 semaines ne déduisent en revanche
+                      ni les jours fériés (~11 jours) ni les RTT — l'estimation reste un
+                      majorant à ce titre.
+                      <br /><br />
+                      <strong>Taux horaire :</strong> coût chargé annuel rapporté aux heures
+                      <em> travaillées</em>, soit ÷ 1 762,5 h (47 × 37.5). Le rapporter à
+                      52 semaines sous-estimerait le coût réel d'une heure et neutraliserait
+                      l'effet des 47 semaines.
+                      <br /><br />
                       Répartition temps basée sur études McKinsey 2011, Uplevel 2024, BLS.
                     </p>
                   </div>
@@ -1057,7 +1238,7 @@ export default function ROICalculator() {
                       Télécharger mes hypothèses (JSON)
                     </button>
                     <div className="text-xs text-slate-400">
-                      Version 1.3 • Janvier 2025
+                      Version 1.4 • Août 2026
                     </div>
                   </div>
                   

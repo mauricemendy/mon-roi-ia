@@ -16,10 +16,13 @@ Contrairement aux calculateurs ROI "marketing" produits par les éditeurs SaaS, 
 
 ✅ Coefficients issus d'**études peer-reviewed** (MIT, Harvard, NBER, Stanford)  
 ✅ **Sources complètes** avec liens vers les papers  
-✅ Coefficients **ajustables** par l'utilisateur  
 ✅ **Export JSON** des hypothèses pour reproductibilité  
 ✅ Section **"Ce qui n'est PAS comptabilisé"** (coûts cachés)  
 ✅ Comparaison **théorique vs. données observées**  
+
+> ⚠️ **Non encore implémenté :** l'ajustement des coefficients par l'utilisateur est
+> prévu (le moteur sait déjà consommer des coefficients personnalisés) mais aucune
+> interface ne l'expose à ce jour. Voir la [roadmap](#-roadmap).
 
 **Public cible :** Managers, Directeurs Techniques, Consultants cherchant à **quantifier** l'impact de l'IA générative avec des hypothèses transparentes et défendables.
 
@@ -48,13 +51,32 @@ Le calculateur s'appuie sur 4 études majeures publiées en 2023 :
 ### Formule de Calcul
 
 ```
-Gain = Σ(Heures_tâche × k_tâche × Facteur_adoption) × Taux_horaire × 4.33 × N_collaborateurs
+Gain = Σ(Heures_tâche × k_tâche × Facteur_adoption) × Taux_horaire × 3.92 × N_collaborateurs
 ```
 
 Où :
 - **k_tâche** : Coefficient d'efficience issu des études (ex: 0.56 pour du code, 0.37 pour de la rédaction)
 - **Facteur_adoption** : 0.5 à 1.0 (intègre validation humaine, courbe d'apprentissage, taux d'usage)
-- **4.33** : Nombre moyen de semaines par mois (52/12)
+- **3.92** : Semaines travaillées par mois (**47 / 12**)
+- **Taux_horaire** : coût chargé annuel rapporté aux heures *travaillées*, soit ÷ **1 762,5 h** (47 × 37,5).
+  Le rapporter à 52 semaines sous-estimerait le coût réel d'une heure et annulerait l'effet des 47 semaines.
+
+### Ce que le résultat en euros représente
+
+**La valeur du temps libéré, pas une économie de trésorerie.** À effectif constant, aucun euro
+n'entre en caisse : les heures sont réallouées à d'autres travaux, et valorisées au taux horaire
+saisi. L'économie n'est réelle que si l'effectif ou la dépense de sous-traitance diminue
+effectivement.
+
+### Pourquoi 47 semaines et non 52
+
+L'année de référence est l'année **travaillée** : 52 semaines moins les 5 semaines
+de congés payés. Un collaborateur en congé ne produit aucun gain, alors que la
+licence se paie douze mois sur douze — retenir 52 surestimerait le résultat
+d'environ 9,5 %.
+
+Ces 47 semaines ne déduisent que les congés payés : ni les jours fériés
+(~11 jours), ni les RTT. L'estimation reste donc un majorant à ce titre.
 
 ---
 
@@ -64,8 +86,8 @@ Où :
 
 ```bash
 # Clone
-git clone https://github.com/mauricemendy/roi-calculator-genai.git
-cd roi-calculator-genai
+git clone https://github.com/mauricemendy/mon-roi-ia.git
+cd mon-roi-ia
 
 # Install
 npm install
@@ -152,8 +174,8 @@ Exemple :
 ```json
 {
   "metadata": {
-    "version": "1.2",
-    "date": "2024-12-23T14:30:00Z",
+    "version": "1.4",
+    "date": "2026-08-25T14:30:00Z",
     "tool": "Calculateur ROI GenAI - mauricemendy.com"
   },
   "configuration": {
@@ -219,6 +241,8 @@ Spécialisé en optimisation de process, automatisation et analyse stratégique 
 
 ## 📈 Roadmap
 
+- [ ] Ajustement des coefficients par l'utilisateur (interface manquante)
+- [ ] Page de résultat partageable par URL
 - [ ] Version multilingue (EN, ES, DE)
 - [ ] Export PDF avec graphiques
 - [ ] Comparaison inter-secteurs
@@ -234,5 +258,5 @@ Si ce projet vous est utile, n'hésitez pas à lui donner une ⭐ sur GitHub !
 
 ---
 
-**Version actuelle :** 1.2  
-**Dernière mise à jour :** Décembre 2025
+**Version actuelle :** 1.4  
+**Dernière mise à jour :** Août 2026
