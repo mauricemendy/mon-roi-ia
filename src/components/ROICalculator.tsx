@@ -4,6 +4,8 @@ import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { track } from "@/lib/analytics";
+import { collect } from "@/lib/collect";
+import { decodeState, shareUrl } from "@/lib/shareState";
 import { Clock, ChevronDown, ChevronUp, BookOpen, Download, AlertTriangle, BarChart3, ExternalLink } from "lucide-react";
 
 interface Task {
@@ -232,11 +234,25 @@ const POTENTIAL_SCALE = [
 type ProfessionKey = keyof typeof PROFESSIONS;
 const INITIAL_PROFESSION: ProfessionKey = 'engineering';
 
+/** Relit une mesure partagée, si l'URL en porte une. */
+function readSharedState() {
+  if (typeof window === 'undefined') return null;
+  return decodeState(
+    window.location.search,
+    key => Object.prototype.hasOwnProperty.call(PROFESSIONS, key),
+    key => PROFESSIONS[key as ProfessionKey].tasks.length
+  );
+}
+
 export default function ROICalculator() {
   // Parcours en trois étapes. L'affinage n'est pas une étape : c'est un
   // dépliage optionnel de l'étape 3, pour que l'analyste voie la mesure bouger
   // pendant qu'il règle, au lieu de régler à l'aveugle avant de la découvrir.
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  // Une mesure partagée arrive complète : on ouvre directement sur le
+  // résultat, sans repasser par l'assistant.
+  const [restored] = useState(readSharedState);
+
+  const [step, setStep] = useState<1 | 2 | 3>(restored ? 3 : 1);
   const [refining, setRefining] = useState(false);
 
   // Un relevé de parcours par visite. Le garde-fou évite le doublon que
@@ -259,24 +275,29 @@ export default function ROICalculator() {
     if (open) track('affinage_ouvert', { metier: prof });
   };
 
-  const [prof, setProf] = useState<ProfessionKey>(INITIAL_PROFESSION);
-  const [collabs, setCollabs] = useState(5);
+  const [prof, setProf] = useState<ProfessionKey>(
+    (restored?.prof as ProfessionKey) ?? INITIAL_PROFESSION
+  );
+  const [collabs, setCollabs] = useState(restored?.collabs ?? 5);
   // Le coût se saisit au choix à l'heure ou à l'année. Une seule des deux
   // valeurs pilote le calcul à la fois — celle du mode actif — et la bascule
   // reporte la valeur courante dans l'autre, pour qu'elles ne divergent jamais.
-  const [rateMode, setRateMode] = useState<'horaire' | 'annuel'>('horaire');
-  const [rate, setRate] = useState(45);
-  const [annualCost, setAnnualCost] = useState(Math.round(45 * WORKED_HOURS_PER_YEAR));
+  const [rateMode, setRateMode] = useState<'horaire' | 'annuel'>(restored?.rateMode ?? 'horaire');
+  const [rate, setRate] = useState(restored?.rate ?? 45);
+  const [annualCost, setAnnualCost] = useState(
+    Math.round((restored?.rate ?? 45) * WORKED_HOURS_PER_YEAR)
+  );
   // Dérivé du métier initial, et non figé sur « engineering » : sinon les
   // heures d'un métier fuient vers un autre si le défaut change.
   const [hours, setHours] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
-    PROFESSIONS[INITIAL_PROFESSION].tasks.forEach(task => {
-      initial[task.id] = task.defaultHours;
+    const key = (restored?.prof as ProfessionKey) ?? INITIAL_PROFESSION;
+    PROFESSIONS[key].tasks.forEach((task, i) => {
+      initial[task.id] = restored?.hours?.[i] ?? task.defaultHours;
     });
     return initial;
   });
-  const [adoptionFactor, setAdoptionFactor] = useState(0.85);
+  const [adoptionFactor, setAdoptionFactor] = useState(restored?.adoption ?? 0.85);
   const [showMethodology, setShowMethodology] = useState(false);
   const [showRealWorld, setShowRealWorld] = useState(false);
   const [customCoefficients, setCustomCoefficients] = useState<number[] | null>(null);
@@ -346,6 +367,7 @@ export default function ROICalculator() {
 
     return {
       hoursPerWeek: hoursPerWeek.toFixed(1),
+      hoursPerWeekRaw: hoursPerWeek,
       // Lecture principale : deux décimales, séparateur français. C'est la
       // précision que l'affichage revendique, elle doit être tenue.
       hoursPerWeekPrecise: hoursPerWeek.toLocaleString('fr-FR', {
@@ -383,6 +405,7 @@ export default function ROICalculator() {
     measured.current = prof;
     track('mesure_affichee', { metier: prof, part_mesuree: Number(results.percentTotal) });
   }, [step, prof, results.percentTotal]);
+
 
   const handleProfessionChange = (newProf: ProfessionKey) => {
     setProf(newProf);
@@ -498,6 +521,69 @@ export default function ROICalculator() {
 
   // Décomposition par tâche, triée par contribution décroissante. Sert le
   // tableau à barres du résultat, qui remplace l'ancien « Top 3 ».
+  // Les heures ont-elles été touchées ? Distingue dans le baromètre une mesure
+  // express d'une mesure affinée par quelqu'un qui connaît son terrain.
+  const hoursDifferFromDefaults = useMemo(
+    () => currentTasks.some(t => (hours[t.id] ?? t.defaultHours) !== t.defaultHours),
+    [currentTasks, hours]
+  );
+
+  const measureUrl = useMemo(
+    () => shareUrl({
+      prof,
+      collabs,
+      rate: effectiveRate,
+      adoption: adoptionFactor,
+      rateMode,
+      hours: hoursDifferFromDefaults
+        ? currentTasks.map(t => hours[t.id] ?? t.defaultHours)
+        : undefined
+    }),
+    [prof, collabs, effectiveRate, adoptionFactor, rateMode, currentTasks, hours, hoursDifferFromDefaults]
+  );
+
+  // Relevé pour le baromètre. Temporisé : sans cela, chaque déplacement de
+  // curseur en mode affinage produirait une ligne. Le module déduplique par
+  // configuration, la temporisation évite seulement les envois inutiles.
+  useEffect(() => {
+    if (step !== 3) return;
+    const t = setTimeout(() => {
+      collect({
+        metier: prof,
+        effectif: collabs,
+        tauxHoraire: Number(effectiveRate.toFixed(2)),
+        adoption: adoptionFactor,
+        semainesTravaillees: WORKED_WEEKS_PER_YEAR,
+        heuresDeclarees: results.totalHours,
+        heuresLiberees: Number(results.hoursPerWeekRaw.toFixed(2)),
+        partMesuree: Number(results.percentTotal),
+        valeurMensuelleHaute: results.net,
+        valeurMensuelleBasse: results.netObserved,
+        affine: hoursDifferFromDefaults,
+        version: '1.4'
+      });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [
+    step, prof, collabs, effectiveRate, adoptionFactor,
+    results.totalHours, results.hoursPerWeekRaw, results.percentTotal,
+    results.net, results.netObserved, hoursDifferFromDefaults
+  ]);
+
+  const [copied, setCopied] = useState(false);
+  const copyMeasureUrl = () => {
+    track('lien_copie', { metier: prof });
+    // Le champ reste sélectionnable si l'API presse-papiers échoue ou manque :
+    // le lien n'est donc jamais inaccessible.
+    navigator.clipboard?.writeText(measureUrl).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      },
+      () => { /* le champ en lecture seule reste la solution de repli */ }
+    );
+  };
+
   const breakdown = useMemo(() => {
     const rows = currentTasks.map((task, i) => {
       const declared = hours[task.id] ?? task.defaultHours;
@@ -1032,6 +1118,34 @@ export default function ROICalculator() {
         <p className="text-[11.5px] text-ink-4 leading-relaxed mt-3">
           Non comptabilisé par ailleurs : formation initiale, courbe d'apprentissage, setup technique,
           maintenance des prompts, résistance organisationnelle.
+        </p>
+      </div>
+
+      {/* Lien de la mesure — l'URL porte toute la configuration, donc il reste
+          valide sans serveur et rouvre exactement le même relevé. */}
+      <div className="px-5 py-4 border-t border-rule bg-sunk">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <span className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4">
+            Lien de cette mesure
+          </span>
+          <button
+            type="button"
+            onClick={copyMeasureUrl}
+            className="px-2.5 py-1 rounded-sm border border-rule-firm bg-surface text-[11.5px] text-ink-2 hover:bg-sunk transition-colors shrink-0"
+          >
+            {copied ? 'Copié' : 'Copier'}
+          </button>
+        </div>
+        <input
+          readOnly
+          value={measureUrl}
+          onFocus={e => e.currentTarget.select()}
+          aria-label="Lien de cette mesure"
+          className="w-full bg-surface border border-rule rounded-sm px-2.5 py-1.5 font-mono text-[11px] text-ink-3 tabular-nums"
+        />
+        <p className="text-[11px] text-ink-4 leading-snug mt-2">
+          Toute la configuration voyage dans l'adresse : le lien rouvre le même relevé, sans compte
+          et sans dépendre d'un serveur.
         </p>
       </div>
     </div>

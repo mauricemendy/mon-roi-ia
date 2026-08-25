@@ -132,8 +132,21 @@ cp .env.example .env.local   # puis renseigner les deux valeurs
 | `VITE_UMAMI_URL` | URL du serveur Umami |
 | `VITE_UMAMI_WEBSITE_ID` | Identifiant du site dans Umami |
 
-Cinq événements sont relevés : `parcours_demarre`, `etape_franchie`,
-`mesure_affichee`, `affinage_ouvert`, `hypotheses_exportees`.
+Six événements sont relevés : `parcours_demarre`, `etape_franchie`,
+`mesure_affichee`, `affinage_ouvert`, `hypotheses_exportees`, `lien_copie`.
+
+### Lien de mesure
+
+Toute la configuration voyage dans l'URL. Un lien partagé rouvre exactement le
+même relevé, **sans dépendre d'aucun serveur** — il reste donc valide si la base
+est indisponible, et fonctionne sur un hébergement statique. Une URL invalide
+retombe sur l'assistant plutôt que d'appliquer un état partiel.
+
+### Table des relevés (optionnelle)
+
+`VITE_METRON_COLLECT_URL` reçoit un relevé anonyme par configuration mesurée,
+sans retour et sans bloquer l'écran. Schéma de la table, requêtes du baromètre
+et consigne de sauvegarde : [docs/barometre-schema.md](./docs/barometre-schema.md).
 
 **Les charges utiles ne transportent aucune donnée identifiante** — uniquement
 le métier, le numéro d'étape et des ordres de grandeur. C'est ce qui maintient
