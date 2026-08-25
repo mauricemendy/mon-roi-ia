@@ -51,13 +51,23 @@ Le calculateur s'appuie sur 4 études majeures publiées en 2023 :
 ### Formule de Calcul
 
 ```
-Gain = Σ(Heures_tâche × k_tâche × Facteur_adoption) × Taux_horaire × 4.33 × N_collaborateurs
+Gain = Σ(Heures_tâche × k_tâche × Facteur_adoption) × Taux_horaire × 3.92 × N_collaborateurs
 ```
 
 Où :
 - **k_tâche** : Coefficient d'efficience issu des études (ex: 0.56 pour du code, 0.37 pour de la rédaction)
 - **Facteur_adoption** : 0.5 à 1.0 (intègre validation humaine, courbe d'apprentissage, taux d'usage)
-- **4.33** : Nombre moyen de semaines par mois (52/12)
+- **3.92** : Semaines travaillées par mois (**47 / 12**)
+
+### Pourquoi 47 semaines et non 52
+
+L'année de référence est l'année **travaillée** : 52 semaines moins les 5 semaines
+de congés payés. Un collaborateur en congé ne produit aucun gain, alors que la
+licence se paie douze mois sur douze — retenir 52 surestimerait le résultat
+d'environ 9,5 %.
+
+Ces 47 semaines ne déduisent que les congés payés : ni les jours fériés
+(~11 jours), ni les RTT. L'estimation reste donc un majorant à ce titre.
 
 ---
 

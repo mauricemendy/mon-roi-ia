@@ -141,6 +141,19 @@ const PROFESSIONS = {
   }
 };
 
+// --- Hypothèses temporelles ---------------------------------------------
+// On raisonne en année *travaillée*, pas en année pleine : 52 semaines moins
+// les 5 semaines de congés payés. Un collaborateur en congé ne produit aucun
+// gain, alors que la licence, elle, se paie douze mois sur douze — retenir 52
+// surestimerait le gain d'environ 9,5 %.
+// Ces 47 semaines ne déduisent que les congés payés : ni les jours fériés
+// (~11 jours), ni les RTT. L'estimation reste donc un majorant à ce titre.
+const WORKED_WEEKS_PER_YEAR = 47;
+// Semaines travaillées ramenées au mois, pour les montants mensuels (≈ 3.92).
+const WORKED_WEEKS_PER_MONTH = WORKED_WEEKS_PER_YEAR / 12;
+// Journée de référence, pour convertir des heures en jours libérés.
+const HOURS_PER_DAY = 7.5;
+
 // Ramène une saisie de champ numérique dans [min, max]. Un champ vidé ou une
 // saisie non numérique retombe sur la valeur de repli plutôt que sur NaN.
 const clampNumber = (raw: string, min: number, max: number, fallback: number) => {
@@ -201,13 +214,14 @@ export default function ROICalculator() {
 
     const totalHours = currentTasks.reduce((acc, t) => acc + (hours[t.id] || t.defaultHours), 0);
 
-    // 4.33 = 52/12. Le moteur raisonne en année pleine, cf. section Hypothèses.
-    const grossGain = hoursPerWeek * safeRate * 4.33 * safeCollabs;
+    // Année travaillée, cf. WORKED_WEEKS_PER_YEAR. Le coût de licence, lui,
+    // court sur les 12 mois : le rapport gain/coût intègre donc les congés.
+    const grossGain = hoursPerWeek * safeRate * WORKED_WEEKS_PER_MONTH * safeCollabs;
     const totalCost = safeCollabs * licenceCost;
 
     return {
       hoursPerWeek: hoursPerWeek.toFixed(1),
-      extraTimeYear: (hoursPerWeek * 52 / 7.5).toFixed(0),
+      extraTimeYear: (hoursPerWeek * WORKED_WEEKS_PER_YEAR / HOURS_PER_DAY).toFixed(0),
       percentTime: ((hoursPerWeek / 37.5) * 100).toFixed(0),
       percentTotal: totalHours > 0 ? ((hoursPerWeek / totalHours) * 100).toFixed(0) : '0',
       gain: Math.round(grossGain),
@@ -245,6 +259,14 @@ export default function ROICalculator() {
         tauxHoraire: rate,
         heuresParTache: hours,
         facteurAdoption: adoptionFactor
+      },
+      hypotheses: {
+        semainesTravailleesParAn: WORKED_WEEKS_PER_YEAR,
+        facteurMensuel: Number(WORKED_WEEKS_PER_MONTH.toFixed(4)),
+        heuresParJour: HOURS_PER_DAY,
+        heuresParSemaine: 37.5,
+        coutLicenceMensuel: 30,
+        note: "47 semaines = 52 - 5 semaines de congés payés. Les jours fériés et les RTT ne sont pas déduits ; la licence est comptée sur 12 mois."
       },
       coefficients: PROFESSIONS[prof as keyof typeof PROFESSIONS].tasks.map((t, i) => ({
         tache: t.label,
@@ -1057,18 +1079,22 @@ export default function ROICalculator() {
                   <div className="space-y-2">
                     <h4 className="font-bold text-slate-800 uppercase text-[10px] tracking-widest">Calculs</h4>
                     <p className="text-slate-600 text-xs">
-                      Gain = Σ(H × k × adoption) × Taux × 4.33 × N
-                      <br />où H = heures/semaine, N = collaborateurs, k = coefficient d'efficience
+                      Gain = Σ(H × k × adoption) × Taux × 3.92 × N
+                      <br />où H = heures/semaine, N = collaborateurs, k = coefficient
+                      d'efficience, et 3.92 = 47 semaines travaillées / 12 mois
                     </p>
                   </div>
                   
                   <div className="space-y-2">
                     <h4 className="font-bold text-slate-800 uppercase text-[10px] tracking-widest">Hypothèses</h4>
                     <p className="text-slate-600 text-xs">
-                      Licence : 30€/mois/user. Semaine : 37.5h.
-                      Année pleine : 52 semaines (facteur mensuel 4.33 = 52/12), sans
-                      déduction des congés ni des absences — les gains affichés sont donc
-                      un majorant à ce titre. Taux incluant charges.
+                      Licence : 30€/mois/user, payée 12 mois. Semaine : 37.5h.
+                      <strong> Année travaillée : 47 semaines</strong> (52 moins 5 semaines
+                      de congés payés), soit un facteur mensuel de 3.92 = 47/12. Un
+                      collaborateur en congé ne produit aucun gain : retenir 52 surestimerait
+                      le résultat d'environ 9,5%. Ces 47 semaines ne déduisent en revanche
+                      ni les jours fériés (~11 jours) ni les RTT — l'estimation reste un
+                      majorant à ce titre. Taux incluant charges.
                       Répartition temps basée sur études McKinsey 2011, Uplevel 2024, BLS.
                     </p>
                   </div>
