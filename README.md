@@ -1,6 +1,11 @@
-# Calculateur ROI GenAI
+# METRON
 
-Un outil de simulation financière **transparent et méthodologiquement rigoureux** pour estimer le retour sur investissement de l'adoption d'outils d'IA générative (ChatGPT, Claude, etc.) dans des contextes professionnels.
+**Mesurer l'impact de l'IA, tâche par tâche.**
+
+Un instrument de mesure — non un calculateur de ROI. METRON estime le temps que
+l'IA générative peut libérer dans une équipe, tâche par tâche, à partir de
+coefficients issus d'études publiées, en affichant ses conditions de mesure et
+son domaine de validité.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
@@ -176,7 +181,7 @@ Exemple :
   "metadata": {
     "version": "1.4",
     "date": "2026-08-25T14:30:00Z",
-    "tool": "Calculateur ROI GenAI - mauricemendy.com"
+    "tool": "METRON - mauricemendy.com"
   },
   "configuration": {
     "profession": "engineering",
