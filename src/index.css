@@ -63,6 +63,8 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    /* Le sol de l'instrument : un neutre légèrement biaisé vers le vert de
+       l'accent, pour que les surfaces s'en détachent sans ombre portée. */
+    @apply bg-paper text-ink-2 font-sans;
   }
 }
