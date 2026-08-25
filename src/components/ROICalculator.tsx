@@ -266,7 +266,9 @@ export default function ROICalculator() {
         heuresParJour: HOURS_PER_DAY,
         heuresParSemaine: 37.5,
         coutLicenceMensuel: 30,
-        note: "47 semaines = 52 - 5 semaines de congés payés. Les jours fériés et les RTT ne sont pas déduits ; la licence est comptée sur 12 mois."
+        baseTauxHoraire: "Coût chargé annuel / 1762.5 h travaillées (47 x 37.5)",
+        note: "47 semaines = 52 - 5 semaines de congés payés. Les jours fériés et les RTT ne sont pas déduits ; la licence est comptée sur 12 mois.",
+        natureDuResultat: "Valeur du temps libéré, et non une économie de trésorerie : à effectif constant les heures sont réallouées, pas encaissées."
       },
       coefficients: PROFESSIONS[prof as keyof typeof PROFESSIONS].tasks.map((t, i) => ({
         tache: t.label,
@@ -465,6 +467,9 @@ export default function ROICalculator() {
                       value={rate}
                       onChange={(e) => setRate(clampNumber(e.target.value, 0, 1000, 0))}
                     />
+                    <p className="text-[10px] text-slate-500 leading-snug">
+                      Coût chargé annuel ÷ {(WORKED_WEEKS_PER_YEAR * 37.5).toLocaleString('fr-FR')} h travaillées
+                    </p>
                   </div>
                 </div>
               </div>
@@ -670,7 +675,7 @@ export default function ROICalculator() {
           <Card className="flex-1 border-slate-200 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-xs uppercase tracking-widest text-blue-600 font-bold">
-                Gain Utilisateur
+                Temps libéré / personne
               </CardTitle>
               <div className="text-xs text-slate-500 italic mt-1">
                 Facteur d'adoption : {(adoptionFactor * 100).toFixed(0)}%
@@ -717,7 +722,7 @@ export default function ROICalculator() {
           <Card className="flex-1 border-slate-200 shadow-sm bg-slate-900 text-white">
             <CardHeader className="pb-2">
               <CardTitle className="text-xs uppercase tracking-widest text-emerald-400 font-bold">
-                Estimation Impact Financier
+                Valeur du temps libéré
               </CardTitle>
               <div className="text-xs text-slate-400 italic mt-1">
                 Hypothèses moyennes secteur {PROFESSIONS[prof as keyof typeof PROFESSIONS].label}
@@ -726,7 +731,14 @@ export default function ROICalculator() {
             <CardContent className="space-y-6">
               <div>
                 <div className="text-5xl font-black text-white">{formatEuro(results.net)}</div>
-                <div className="text-sm text-slate-400 mt-1 uppercase tracking-wide">Gain net mensuel estimé pour l'équipe</div>
+                <div className="text-sm text-slate-400 mt-1 uppercase tracking-wide">
+                  Valeur mensuelle du temps libéré — équipe
+                </div>
+                <div className="text-xs text-slate-400 mt-3 leading-relaxed">
+                  <strong className="text-slate-200">Ce n'est pas une économie.</strong> À effectif constant,
+                  aucun euro n'entre en caisse : ce sont des heures réallouées, valorisées au taux horaire
+                  que vous avez saisi. Net du coût des licences.
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-8 pt-6 border-t border-white/10">
                 <div>
@@ -1094,7 +1106,13 @@ export default function ROICalculator() {
                       collaborateur en congé ne produit aucun gain : retenir 52 surestimerait
                       le résultat d'environ 9,5%. Ces 47 semaines ne déduisent en revanche
                       ni les jours fériés (~11 jours) ni les RTT — l'estimation reste un
-                      majorant à ce titre. Taux incluant charges.
+                      majorant à ce titre.
+                      <br /><br />
+                      <strong>Taux horaire :</strong> coût chargé annuel rapporté aux heures
+                      <em> travaillées</em>, soit ÷ 1 762,5 h (47 × 37.5). Le rapporter à
+                      52 semaines sous-estimerait le coût réel d'une heure et neutraliserait
+                      l'effet des 47 semaines.
+                      <br /><br />
                       Répartition temps basée sur études McKinsey 2011, Uplevel 2024, BLS.
                     </p>
                   </div>

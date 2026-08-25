@@ -58,6 +58,15 @@ Où :
 - **k_tâche** : Coefficient d'efficience issu des études (ex: 0.56 pour du code, 0.37 pour de la rédaction)
 - **Facteur_adoption** : 0.5 à 1.0 (intègre validation humaine, courbe d'apprentissage, taux d'usage)
 - **3.92** : Semaines travaillées par mois (**47 / 12**)
+- **Taux_horaire** : coût chargé annuel rapporté aux heures *travaillées*, soit ÷ **1 762,5 h** (47 × 37,5).
+  Le rapporter à 52 semaines sous-estimerait le coût réel d'une heure et annulerait l'effet des 47 semaines.
+
+### Ce que le résultat en euros représente
+
+**La valeur du temps libéré, pas une économie de trésorerie.** À effectif constant, aucun euro
+n'entre en caisse : les heures sont réallouées à d'autres travaux, et valorisées au taux horaire
+saisi. L'économie n'est réelle que si l'effectif ou la dépense de sous-traitance diminue
+effectivement.
 
 ### Pourquoi 47 semaines et non 52
 
