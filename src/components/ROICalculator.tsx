@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { track } from "@/lib/analytics";
 import { collect } from "@/lib/collect";
 import { decodeState, shareUrl } from "@/lib/shareState";
+import { lecturesPour, corpusRenseigne } from "@/data/lectures";
 import { Clock, ChevronDown, ChevronUp, BookOpen, Download, AlertTriangle, BarChart3, ExternalLink } from "lucide-react";
 
 interface Task {
@@ -570,6 +571,7 @@ export default function ROICalculator() {
     results.net, results.netObserved, hoursDifferFromDefaults
   ]);
 
+
   const [copied, setCopied] = useState(false);
   const copyMeasureUrl = () => {
     track('lien_copie', { metier: prof });
@@ -596,6 +598,25 @@ export default function ROICalculator() {
     const axisMax = Math.max(0.1, Math.ceil(Math.max(...rows.map(r => r.gain)) * 10) / 10);
     return { rows, axisMax };
   }, [currentTasks, hours, adoptionFactor, customCoefficients]);
+
+  // Parcours de lecture : on suit l'ordre de la décomposition, donc les tâches
+  // où la mesure indique le plus de potentiel viennent en premier. Plafonné à
+  // quatre entrées — au-delà ce n'est plus un parcours, c'est une archive.
+  const parcoursLecture = useMemo(() => {
+    if (!corpusRenseigne) return [];
+    const vues = new Set<string>();
+    const sortie: Array<{ tache: string; gain: number; lecture: ReturnType<typeof lecturesPour>[0] }> = [];
+    for (const { task, gain } of breakdown.rows) {
+      if (gain <= 0) continue;
+      for (const lecture of lecturesPour(prof, task.id, task.label)) {
+        if (vues.has(lecture.url)) continue;
+        vues.add(lecture.url);
+        sortie.push({ tache: task.label, gain, lecture });
+        if (sortie.length >= 4) return sortie;
+      }
+    }
+    return sortie;
+  }, [prof, breakdown.rows]);
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -1120,6 +1141,48 @@ export default function ROICalculator() {
           maintenance des prompts, résistance organisationnelle.
         </p>
       </div>
+
+      {/* Parcours de lecture — gratuit et sans inscription. On ouvre une suite,
+          on ne pose pas une barrière. Absent tant que le corpus n'est pas relié. */}
+      {parcoursLecture.length > 0 && (
+        <div className="px-5 py-5 border-t border-rule">
+          <div className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4 mb-3">
+            Sur les tâches où vous avez le plus de potentiel
+          </div>
+          <ul className="divide-y divide-rule border-y border-rule">
+            {parcoursLecture.map(({ tache, gain, lecture }) => (
+              <li key={lecture.url}>
+                <a
+                  href={lecture.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex gap-3 py-3 group"
+                >
+                  <span className="font-mono text-[11px] text-ink-4 tabular-nums pt-0.5 shrink-0 w-14 text-right">
+                    {gain.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} h
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-mono text-[10px] uppercase tracking-[0.06em] text-ink-4">
+                      {tache}
+                    </span>
+                    <span className="block text-[13.5px] text-ink group-hover:text-gauge-ink transition-colors">
+                      {lecture.titre}
+                    </span>
+                    {lecture.angle && (
+                      <span className="block text-[11.5px] text-ink-3 leading-snug mt-0.5">
+                        {lecture.angle}
+                      </span>
+                    )}
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-ink-4 leading-snug mt-3">
+            Lectures classées par contribution au temps libéré, pas par date. En accès libre.
+          </p>
+        </div>
+      )}
 
       {/* Lien de la mesure — l'URL porte toute la configuration, donc il reste
           valide sans serveur et rouvre exactement le même relevé. */}

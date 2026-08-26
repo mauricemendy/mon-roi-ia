@@ -142,6 +142,22 @@ même relevé, **sans dépendre d'aucun serveur** — il reste donc valide si la
 est indisponible, et fonctionne sur un hébergement statique. Une URL invalide
 retombe sur l'assistant plutôt que d'appliquer un état partiel.
 
+### Parcours de lecture
+
+Le résultat renvoie vers les articles qui traitent **les tâches où la mesure
+indique le plus de potentiel** — classés par contribution, pas par date, et en
+accès libre. C'est le levier que rien ne remplace : une échelle de potentiel se
+copie en une semaine, un corpus non.
+
+Le mapping vit dans `src/data/lectures.ts`. Tant qu'il est vide, le bloc
+n'apparaît pas. La grille à remplir, classée par levier, est dans
+[docs/mapping-taches-articles.md](./docs/mapping-taches-articles.md).
+
+Les identifiants de tâche (`t1`, `t2`…) étant positionnels, chaque entrée
+rappelle le libellé attendu. En cas de dérive, le mapping est ignoré et un
+avertissement s'affiche en développement : mieux vaut ne rien proposer qu'un
+lien faux.
+
 ### Table des relevés (optionnelle)
 
 `VITE_METRON_COLLECT_URL` reçoit un relevé anonyme par configuration mesurée,
