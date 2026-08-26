@@ -13,6 +13,8 @@ interface ImportMetaEnv {
   readonly VITE_UMAMI_WEBSITE_ID?: string;
   /** Point d'entrée qui insère un relevé anonyme dans la table du baromètre. */
   readonly VITE_METRON_COLLECT_URL?: string;
+  /** Worker de capture vers Brevo, en double opt-in. */
+  readonly VITE_METRON_SUBSCRIBE_URL?: string;
 }
 
 interface ImportMeta {

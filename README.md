@@ -158,6 +158,20 @@ rappelle le libellé attendu. En cas de dérive, le mapping est ignoré et un
 avertissement s'affiche en développement : mieux vaut ne rien proposer qu'un
 lien faux.
 
+### Inscription (optionnelle)
+
+`VITE_METRON_SUBSCRIBE_URL` pointe vers un Worker qui capte vers **Brevo en
+double opt-in**. Le dépôt ne connaît qu'une URL : la clé, la liste et le routage
+vivent dans le Worker.
+
+Sans la variable, le bloc n'apparaît pas et rien n'est émis. Elle restera vide
+jusqu'à la migration de domaine — le Worker n'a pas d'origine CORS stable tant
+que l'outil vit sur `github.io`.
+
+La mesure reste **entière et gratuite** : l'inscription propose la suite, pas
+l'accès. Contrat d'attributs, routage et points ouverts :
+[docs/capture-contrat.md](./docs/capture-contrat.md).
+
 ### Table des relevés (optionnelle)
 
 `VITE_METRON_COLLECT_URL` reçoit un relevé anonyme par configuration mesurée,
