@@ -1,6 +1,11 @@
-# Calculateur ROI GenAI
+# METRON
 
-Un outil de simulation financière **transparent et méthodologiquement rigoureux** pour estimer le retour sur investissement de l'adoption d'outils d'IA générative (ChatGPT, Claude, etc.) dans des contextes professionnels.
+**Mesurer l'impact de l'IA, tâche par tâche.**
+
+Un instrument de mesure — non un calculateur de ROI. METRON estime le temps que
+l'IA générative peut libérer dans une équipe, tâche par tâche, à partir de
+coefficients issus d'études publiées, en affichant ses conditions de mesure et
+son domaine de validité.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
@@ -112,6 +117,43 @@ function App() {
 - Tailwind CSS
 - shadcn/ui components
 
+### Mesure d'audience (optionnelle)
+
+L'instrumentation cible **Umami auto-hébergé**, sans cookie et sans bandeau de
+consentement. Elle est **inerte par défaut** : sans les deux variables
+ci-dessous, aucun script n'est chargé et aucune requête n'est émise.
+
+```bash
+cp .env.example .env.local   # puis renseigner les deux valeurs
+```
+
+| Variable | Rôle |
+|---|---|
+| `VITE_UMAMI_URL` | URL du serveur Umami |
+| `VITE_UMAMI_WEBSITE_ID` | Identifiant du site dans Umami |
+
+Six événements sont relevés : `parcours_demarre`, `etape_franchie`,
+`mesure_affichee`, `affinage_ouvert`, `hypotheses_exportees`, `lien_copie`.
+
+### Lien de mesure
+
+Toute la configuration voyage dans l'URL. Un lien partagé rouvre exactement le
+même relevé, **sans dépendre d'aucun serveur** — il reste donc valide si la base
+est indisponible, et fonctionne sur un hébergement statique. Une URL invalide
+retombe sur l'assistant plutôt que d'appliquer un état partiel.
+
+### Table des relevés (optionnelle)
+
+`VITE_METRON_COLLECT_URL` reçoit un relevé anonyme par configuration mesurée,
+sans retour et sans bloquer l'écran. Schéma de la table, requêtes du baromètre
+et consigne de sauvegarde : [docs/barometre-schema.md](./docs/barometre-schema.md).
+
+**Les charges utiles ne transportent aucune donnée identifiante** — uniquement
+le métier, le numéro d'étape et des ordres de grandeur. C'est ce qui maintient
+le dispositif dans les conditions d'exemption de consentement de la CNIL. Une
+mention dans la politique de confidentialité et un moyen de refus restent
+néanmoins dus.
+
 ---
 
 ## 📸 Captures d'écran
@@ -176,7 +218,7 @@ Exemple :
   "metadata": {
     "version": "1.4",
     "date": "2026-08-25T14:30:00Z",
-    "tool": "Calculateur ROI GenAI - mauricemendy.com"
+    "tool": "METRON - mauricemendy.com"
   },
   "configuration": {
     "profession": "engineering",
