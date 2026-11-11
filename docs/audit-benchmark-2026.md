@@ -1,13 +1,17 @@
-# Mon ROI IA — Benchmark marché, audit & cap stratégique
+# METRON — Benchmark marché, audit & cap stratégique
 
 **Date :** Août 2026 · **Périmètre :** repo `mauricemendy/mon-roi-ia` (v1.3 au moment de l'audit) + recherche marché
 **Objectif :** faire de l'outil un moteur de leads et de diagnostic.
 
-> **Révision du 25 août 2026.** Ce document a été corrigé après un fact-check ligne à ligne
-> du code et une revue critique. Les corrections portent sur trois constats techniques
-> inexacts, le retrait de trois sources non défendables, l'abandon du score synthétique,
-> et l'ajout de deux angles manquants (le corpus éditorial, la limite de périmètre du
-> moteur). Le journal des corrections figure en fin de document.
+> **Révision 3 — 25 août 2026.** Deux passes de correction ont suivi la version initiale.
+> La première portait sur un fact-check ligne à ligne du code, le retrait de trois sources
+> non défendables, l'abandon du score synthétique et l'ajout de deux angles manquants
+> (le corpus éditorial, la limite de périmètre du moteur). La seconde corrige
+> **l'infrastructure de capture**, sur laquelle ce rapport s'est trompé deux fois : voir §5,
+> qui dit ce qui est vrai plutôt que seulement ce qui était faux.
+>
+> L'outil s'appelle désormais **METRON**. Le contrat de capture est détaillé dans
+> `docs/capture-contrat.md`, le schéma du baromètre dans `docs/barometre-schema.md`.
 
 ---
 
@@ -17,7 +21,7 @@
 
 L'atout de l'outil est réel et rare : **seul acteur du panel avec une méthodologie sourcée, transparente et falsifiable**, là où les concurrents vendent un « algorithme propriétaire » aux chiffres flatteurs. Mais cet atout ne convertit rien : aucune capture de lead, aucun diagnostic actionnable, aucune mesure d'usage, et un hébergement sur `github.io` où chaque backlink construit l'autorité de GitHub.
 
-**Le plan : garder le moteur, changer l'emballage, brancher le tunnel — sur l'infrastructure Ghost déjà en place.**
+**Le plan : garder le moteur, changer l'emballage, brancher le tunnel — sur Brevo, qui porte déjà la liste, le scoring et les séquences.**
 
 ---
 
@@ -140,22 +144,32 @@ Le calculateur produit une liste de tâches classées par potentiel. Le blog com
 
 Un utilisateur dont le Top 3 fait ressortir la gestion documentaire devrait sortir avec **le nom de la tâche, l'ordre de grandeur du gain, et le lien vers l'article qui traite ce cas précis**. Aucun acteur du panel ne peut faire ça, parce qu'aucun n'a de corpus. **Un concurrent copie un score en une semaine ; il ne copie pas trois ans d'écriture.**
 
-Cela change la nature de l'échange : on ne demande plus une adresse contre un PDF générique, on ouvre un parcours de lecture personnalisé, et l'inscription devient la suite naturelle plutôt qu'un péage. C'est aussi le seul montage où la conversion est mesurable article par article dans Ghost.
+Cela change la nature de l'échange : on ne demande plus une adresse contre un PDF générique, on ouvre un parcours de lecture personnalisé, et l'inscription devient la suite naturelle plutôt qu'un péage. C'est aussi le seul montage où la conversion est mesurable article par article.
 
 **Travail préparatoire, à faire une fois :** le mapping tâche → article. Huit métiers, une dizaine de tâches chacun, à relier aux articles publiés et aux volets à paraître. Toutes les tâches n'auront pas d'article — c'est une information utile, elle indique où le corpus a des trous.
 
 ---
 
-## 5. Infrastructure : partir de Ghost, ne rien reconstruire
+## 5. Infrastructure : Brevo détient et envoie, un seul Worker capte
 
-Une version antérieure de ce rapport recommandait un webhook n8n, une génération de rapport, un envoi via Resend ou Brevo et une liste de diffusion dédiée. **C'était une erreur** : Ghost embarque nativement les membres, les newsletters, les tiers et les offres. Monter une base parallèle produirait deux fichiers de contacts à réconcilier, deux points de désabonnement et une conformité RGPD à tenir en double.
+Ce rapport s'est trompé deux fois sur ce point, et il faut dire ce qui est vrai plutôt que seulement ce qui était faux.
 
-**Nuance à garder en tête :** Ghost envoie des *diffusions* à des segments, pas un *document généré par répondant*. Si la contrepartie retenue est un rapport personnalisé, il reste un besoin de rendu et d'envoi — qui peut s'appuyer sur l'Admin API Ghost pour créer le membre, sans base parallèle, mais qui n'est pas zéro infrastructure. **C'est donc la nature de la contrepartie qui détermine l'infrastructure, et non l'inverse.**
+La première version recommandait une pile n8n / Resend / Brevo avec une liste dédiée. La deuxième corrigeait vers « Ghost natif, zéro infrastructure supplémentaire ». **Les deux ignoraient que Brevo porte déjà la liste, le scoring et les séquences**, et la seconde supposait à tort que Ghost pouvait envoyer sans dépendance payante.
+
+**Ce qui est vrai :**
+
+- **Brevo détient la liste et envoie.** Palier gratuit à 300 emails par jour, contacts illimités, automatisations. Ghost auto-hébergé ne peut envoyer qu'à travers Mailgun, plafonné à 100 emails par jour en gratuit — trois fois moins que l'outil déjà en place. Il n'y a donc pas d'arbitrage.
+- **Le membership Ghost reste éteint.** Son dernier argument était le double opt-in gratuit ; Brevo en fait autant. Ne resterait qu'une base de membres qui ne reçoit rien et diverge à la première désinscription. *Seul renversement possible :* du contenu réservé aux abonnés, que Ghost fait nativement et Brevo non.
+- **Un seul Worker** pour toutes les captures publiques, avec un champ `source` qui route vers la bonne liste. Une clé, un déploiement. **Worker en entrée, n8n en aval** — orchestration après coup, jamais dans le chemin de capture.
+- **Double opt-in via `POST /v3/contacts/doubleOptinConfirmation`**, et non `POST /contacts` : le contact n'entre dans la liste qu'après le clic, ce qui constitue la trace de consentement.
+- **Un socle d'attributs commun** — `SOURCE`, `DATE_OPTIN`, `TRANCHE_EFFECTIF` — puis les attributs propres à chaque outil. Sans socle, aucune séquence ne peut segmenter sur autre chose que l'outil d'origine.
+
+Contrat complet, bornes des tranches et points restés ouverts : `docs/capture-contrat.md`.
 
 Le montage le plus léger — parcours de lecture affiché directement sur la page de résultat, inscription proposée mais optionnelle — ne demande aucune infrastructure supplémentaire.
 
 ### Deux extrémités à ouvrir avant tout tunnel
-La newsletter Ghost n'est pas activée, et la page « Travailler avec moi » est en HTML prêt, non collée, avec ses placeholders. Un dispositif qui capture des adresses vers une newsletter absente et pointe vers une page non publiée ne convertit rien. Deux tâches courtes, et elles conditionnent le reste.
+La page « Travailler avec moi » est en HTML prêt, non collée, avec ses placeholders. Et le Worker de capture n'a pas encore d'origine stable à autoriser : METRON vit toujours sur `github.io`. Un dispositif qui pointe vers une page non publiée, depuis un domaine qui va changer, ne convertit rien.
 
 ---
 
@@ -191,10 +205,10 @@ Sept occurrences de `color.bar`/`color.badge`, classe dynamique ligne 740, borne
 **Reste à trancher :** la mesure d'usage (réutiliser la propriété GA existante pour un parcours blog ↔ outil unifié, ou dispositif séparé sans cookie).
 
 ### Étape 1 — Ouvrir les extrémités
-Activer la newsletter Ghost. Publier « Travailler avec moi ». Migrer l'outil sous le domaine. Publier les volets en draft. **Rien de tout cela ne dépend d'une décision d'offre.**
+Publier « Travailler avec moi ». Migrer l'outil sous le domaine — ce qui donne au Worker son origine CORS. Déployer le Worker de capture. Publier les volets en draft. **Rien de tout cela ne dépend d'une décision d'offre.**
 
 ### Étape 2 — Transformer
-Parcours à deux vitesses. Résultats reliés au corpus (§4). Roadmap dérivée des réponses. Page de résultat partageable par URL — l'artefact réellement manquant pour un manager qui veut convaincre sa direction. Inscription via les membres Ghost. Coefficients ajustables, ou retrait définitif de la promesse.
+Parcours à deux vitesses. Résultats reliés au corpus (§4). Roadmap dérivée des réponses. Page de résultat partageable par URL — l'artefact réellement manquant pour un manager qui veut convaincre sa direction. Inscription via le Worker vers Brevo, en double opt-in. Coefficients ajustables, ou retrait définitif de la promesse.
 
 ### Étape 3 — Le flywheel
 Agrégats anonymisés publiés en baromètre récurrent par métier. Contenu unique, auto-alimenté, impossible à produire sans l'outil — et ce qui justifie de poser la mesure dès l'étape 0.
@@ -215,9 +229,11 @@ Agrégats anonymisés publiés en baromètre récurrent par métier. Contenu uni
 
 **Constats techniques rectifiés :** `Infinity` → `NaN` · « aligner 47/52 » → arbitrage, tranché en faveur de 47 · tips « génériques » → superficiels mais dynamiques.
 
+**Révision 3 (infrastructure de capture) :** Brevo détient et envoie, le membership Ghost reste éteint, un seul Worker capte en double opt-in, socle d'attributs commun. Les deux recommandations antérieures — pile n8n/Resend/Brevo, puis « Ghost natif » — étaient fausses pour la même raison : elles ignoraient la liste déjà en place.
+
 **Retraits :** le « 95 % » du MIT · les statistiques de conversion des plateformes de quiz, reléguées à l'usage interne · le score synthétique 0–100, remplacé par un profil nommé sur critères visibles.
 
-**Ajouts :** le corpus éditorial comme levier principal (§4) · l'infrastructure Ghost à la place de la pile n8n / Resend / Brevo (§5) · la limite de périmètre assistance vs automatisation (§6) · le traitement des sources (§7) · la requalification de la validation terrain · les deux défauts découverts après coup (build cassé, `App.tsx` mort).
+**Ajouts :** le corpus éditorial comme levier principal (§4) · l'infrastructure de capture corrigée deux fois, désormais fixée sur Brevo (§5) · la limite de périmètre assistance vs automatisation (§6) · le traitement des sources (§7) · la requalification de la validation terrain · les deux défauts découverts après coup (build cassé, `App.tsx` mort).
 
 ---
 

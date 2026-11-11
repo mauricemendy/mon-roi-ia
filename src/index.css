@@ -68,3 +68,14 @@
     @apply bg-paper text-ink-2 font-sans;
   }
 }
+@layer utilities {
+  /* Libellé réservé aux lecteurs d'écran. */
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap; border-width: 0;
+  }
+}

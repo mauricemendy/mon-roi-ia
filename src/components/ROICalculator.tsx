@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { track } from "@/lib/analytics";
 import { collect } from "@/lib/collect";
 import { decodeState, shareUrl } from "@/lib/shareState";
+import { lecturesPour, corpusRenseigne } from "@/data/lectures";
+import { subscribe, subscribeEnabled, trancheEffectif, emailPlausible, type Resultat } from "@/lib/subscribe";
 import { Clock, ChevronDown, ChevronUp, BookOpen, Download, AlertTriangle, BarChart3, ExternalLink } from "lucide-react";
 
 interface Task {
@@ -570,6 +572,29 @@ export default function ROICalculator() {
     results.net, results.netObserved, hoursDifferFromDefaults
   ]);
 
+
+  // Inscription. Le double opt-in impose la formulation de l'état « envoyé » :
+  // le contact n'est pas inscrit tant qu'il n'a pas cliqué dans son email.
+  const [email, setEmail] = useState('');
+  const [envoi, setEnvoi] = useState<'repos' | 'encours' | Resultat>('repos');
+
+  const soumettreInscription = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (envoi === 'encours') return;
+    setEnvoi('encours');
+    track('inscription_tentee', { metier: prof });
+    const r = await subscribe({
+      email,
+      source: 'metron',
+      tranche_effectif: trancheEffectif(collabs),
+      metier: prof,
+      part_mesuree: Number(results.percentTotal),
+      affine: hoursDifferFromDefaults
+    });
+    setEnvoi(r);
+    if (r === 'ok') track('inscription_envoyee', { metier: prof });
+  };
+
   const [copied, setCopied] = useState(false);
   const copyMeasureUrl = () => {
     track('lien_copie', { metier: prof });
@@ -596,6 +621,25 @@ export default function ROICalculator() {
     const axisMax = Math.max(0.1, Math.ceil(Math.max(...rows.map(r => r.gain)) * 10) / 10);
     return { rows, axisMax };
   }, [currentTasks, hours, adoptionFactor, customCoefficients]);
+
+  // Parcours de lecture : on suit l'ordre de la décomposition, donc les tâches
+  // où la mesure indique le plus de potentiel viennent en premier. Plafonné à
+  // quatre entrées — au-delà ce n'est plus un parcours, c'est une archive.
+  const parcoursLecture = useMemo(() => {
+    if (!corpusRenseigne) return [];
+    const vues = new Set<string>();
+    const sortie: Array<{ tache: string; gain: number; lecture: ReturnType<typeof lecturesPour>[0] }> = [];
+    for (const { task, gain } of breakdown.rows) {
+      if (gain <= 0) continue;
+      for (const lecture of lecturesPour(prof, task.id, task.label)) {
+        if (vues.has(lecture.url)) continue;
+        vues.add(lecture.url);
+        sortie.push({ tache: task.label, gain, lecture });
+        if (sortie.length >= 4) return sortie;
+      }
+    }
+    return sortie;
+  }, [prof, breakdown.rows]);
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -1120,6 +1164,106 @@ export default function ROICalculator() {
           maintenance des prompts, résistance organisationnelle.
         </p>
       </div>
+
+      {/* Parcours de lecture — gratuit et sans inscription. On ouvre une suite,
+          on ne pose pas une barrière. Absent tant que le corpus n'est pas relié. */}
+      {parcoursLecture.length > 0 && (
+        <div className="px-5 py-5 border-t border-rule">
+          <div className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4 mb-3">
+            Sur les tâches où vous avez le plus de potentiel
+          </div>
+          <ul className="divide-y divide-rule border-y border-rule">
+            {parcoursLecture.map(({ tache, gain, lecture }) => (
+              <li key={lecture.url}>
+                <a
+                  href={lecture.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex gap-3 py-3 group"
+                >
+                  <span className="font-mono text-[11px] text-ink-4 tabular-nums pt-0.5 shrink-0 w-14 text-right">
+                    {gain.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} h
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-mono text-[10px] uppercase tracking-[0.06em] text-ink-4">
+                      {tache}
+                    </span>
+                    <span className="block text-[13.5px] text-ink group-hover:text-gauge-ink transition-colors">
+                      {lecture.titre}
+                    </span>
+                    {lecture.angle && (
+                      <span className="block text-[11.5px] text-ink-3 leading-snug mt-0.5">
+                        {lecture.angle}
+                      </span>
+                    )}
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-ink-4 leading-snug mt-3">
+            Lectures classées par contribution au temps libéré, pas par date. En accès libre.
+          </p>
+        </div>
+      )}
+
+      {/* Inscription — aucune rétention : la mesure ci-dessus est entière et
+          gratuite. Ce qu'on propose, c'est la suite, sur une promesse que
+          l'outil énonce déjà lui-même dans ses conditions de mesure. */}
+      {subscribeEnabled && (
+        <div className="px-5 py-5 border-t border-rule">
+          <div className="text-[10px] font-semibold tracking-[0.14em] uppercase text-ink-4 mb-2">
+            Quand ces coefficients seront révisés
+          </div>
+          <p className="text-[13px] text-ink-2 leading-relaxed max-w-[62ch]">
+            Les coefficients datent de 2023, en contexte GPT-4. Ils seront revus — c'est écrit
+            plus haut, et ce n'est pas un détail. Laissez une adresse pour être prévenu à ce
+            moment-là, et recevoir votre mesure recalculée.
+          </p>
+
+          {envoi === 'ok' ? (
+            <p className="mt-3 text-[13px] text-gauge-ink">
+              Un email de confirmation vient de partir. <strong>L'inscription n'est effective
+              qu'après le clic</strong> — c'est ce qui en fait un consentement vérifiable.
+            </p>
+          ) : (
+            <form onSubmit={soumettreInscription} className="mt-3 flex flex-wrap gap-2 items-start">
+              <label className="sr-only" htmlFor="metron-email">Adresse email</label>
+              <input
+                id="metron-email"
+                type="email"
+                required
+                value={email}
+                onChange={e => { setEmail(e.target.value); if (envoi !== 'repos') setEnvoi('repos'); }}
+                placeholder="vous@exemple.fr"
+                autoComplete="email"
+                className="flex-1 min-w-[220px] bg-surface border border-rule-firm rounded-sm px-3 py-2 text-[13px] text-ink placeholder:text-ink-4"
+              />
+              <button
+                type="submit"
+                disabled={envoi === 'encours' || !emailPlausible(email)}
+                className="px-4 py-2 rounded-sm bg-ink text-surface text-[13px] font-medium hover:bg-ink-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {envoi === 'encours' ? 'Envoi…' : 'Être prévenu'}
+              </button>
+              {envoi === 'invalide' && (
+                <p className="w-full text-[12px] text-ink-3">Cette adresse ne semble pas valide.</p>
+              )}
+              {envoi === 'erreur' && (
+                <p className="w-full text-[12px] text-ink-3">
+                  L'envoi a échoué. Réessayez dans un moment — votre mesure, elle, reste
+                  accessible par le lien ci-dessous.
+                </p>
+              )}
+            </form>
+          )}
+
+          <p className="text-[11px] text-ink-4 leading-snug mt-3">
+            Une adresse, rien d'autre. Le métier et la taille d'équipe mesurés servent à ne vous
+            envoyer que ce qui vous concerne. Désinscription en un clic, à tout moment.
+          </p>
+        </div>
+      )}
 
       {/* Lien de la mesure — l'URL porte toute la configuration, donc il reste
           valide sans serveur et rouvre exactement le même relevé. */}
